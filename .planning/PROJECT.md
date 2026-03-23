@@ -2,7 +2,7 @@
 
 ## What This Is
 
-A shell-based CLI tool (`lr`) that runs AI coding agents (Claude Code, Codex) inside QEMU virtual machines, completely isolated from the host filesystem. The VM communicates with the host only via git, and API keys never enter the VM — a Caddy reverse proxy on the host injects authorization headers. Built on top of pirj/aq for fast VM lifecycle management.
+A shell-based CLI tool (`rl`) that runs AI coding agents (Claude Code, Codex) inside QEMU virtual machines, completely isolated from the host filesystem. The VM communicates with the host only via git, and API keys never enter the VM — a Caddy reverse proxy on the host injects authorization headers. Built on top of pirj/aq for fast VM lifecycle management.
 
 ## Core Value
 
@@ -16,14 +16,14 @@ AI agents can run in full "danger mode" without risking the host machine — cod
 
 ### Active
 
-- [ ] User can create a new per-repo VM with `lr new` that has Claude Code, Codex, tmux, and git installed (Alpine Linux via aq)
-- [ ] User can SSH into the VM and start/resume a coding session with `lr code`
+- [ ] User can create a new per-repo VM with `rl new` that has Claude Code, Codex, tmux, and git installed (Alpine Linux via aq)
+- [ ] User can SSH into the VM and start/resume a coding session with `rl code`
 - [ ] Host adds guest as a git remote — guest has no GitHub access, only local git
 - [ ] API keys stay on the host; Caddy proxy injects Authorization headers for Anthropic and OpenAI APIs
 - [ ] Guest Claude Code/Codex configured to use host proxy via custom API base URL env vars (ANTHROPIC_BASE_URL, OPENAI_BASE_URL)
 - [ ] Caddy listens on host, guest reaches it via QEMU gateway (10.0.2.2)
 - [ ] VM has internet access for documentation and package installation
-- [ ] Config file copying from host is opt-in and explicit (e.g. `lr new --config claude --config git`)
+- [ ] Config file copying from host is opt-in and explicit (e.g. `rl new --config claude --config git`)
 - [ ] VM resource limits enforced (1GB disk, 1 vCPU — handled by aq defaults)
 - [ ] Tool works as an installable open source project others can use
 
