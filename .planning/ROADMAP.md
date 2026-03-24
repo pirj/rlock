@@ -31,7 +31,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   5. The `rl` CLI dispatches subcommands via a modular lib/ structure with ShellCheck-clean code
 **Plans:** 2 plans
 Plans:
-- [ ] 01-01-PLAN.md -- CLI skeleton, shared modules (util.sh, ui.sh), status and rm commands
+- [x] 01-01-PLAN.md -- CLI skeleton, shared modules (util.sh, ui.sh), status and rm commands
 - [ ] 01-02-PLAN.md -- VM creation (rl new), session connect (rl code), end-to-end verification
 
 ### Phase 2: Security Boundary
