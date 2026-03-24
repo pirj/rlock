@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Ready to execute
-stopped_at: Completed 01-01-PLAN.md
-last_updated: "2026-03-24T21:47:26.235Z"
+status: Phase complete — ready for verification
+stopped_at: Completed 01-02-PLAN.md
+last_updated: "2026-03-24T23:44:20.606Z"
 progress:
   total_phases: 4
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 2
-  completed_plans: 1
+  completed_plans: 2
 ---
 
 # Project State
@@ -47,6 +47,7 @@ Plan: 2 of 2
 
 *Updated after each plan completion*
 | Phase 01 P01 | 3min | 2 tasks | 4 files |
+| Phase 01 P02 | 39min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -59,6 +60,8 @@ Recent decisions affecting current work:
 
 - [Phase 01]: Source ui.sh before util.sh so die() has access to color variables
 - [Phase 01]: Use ShellCheck --severity=warning for CI (SC1091 info on dynamic source is expected)
+- [Phase 01]: save_vm_name called right after aq new (before aq start) so rl rm can always clean up partial failures
+- [Phase 01]: resolve_vm_name falls back to directory-name VM lookup for orphaned VM recovery in status/code/rm commands
 
 ### Pending Todos
 
@@ -72,6 +75,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-24T21:47:26.233Z
-Stopped at: Completed 01-01-PLAN.md
+Last session: 2026-03-24T23:44:11.885Z
+Stopped at: Completed 01-02-PLAN.md
 Resume file: None

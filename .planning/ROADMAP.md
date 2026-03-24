@@ -32,7 +32,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans:** 2 plans
 Plans:
 - [x] 01-01-PLAN.md -- CLI skeleton, shared modules (util.sh, ui.sh), status and rm commands
-- [ ] 01-02-PLAN.md -- VM creation (rl new), session connect (rl code), end-to-end verification
+- [x] 01-02-PLAN.md -- VM creation (rl new), session connect (rl code), end-to-end verification
 
 ### Phase 2: Security Boundary
 **Goal**: API keys never enter the VM; a host-side Caddy reverse proxy injects Authorization headers so AI agents can call APIs without possessing secrets

@@ -7,13 +7,13 @@
 
 ### VM Lifecycle
 
-- [ ] **VM-01**: User can create a new per-repo VM with `rl new` (Alpine Linux via aq, with Claude Code, Codex, tmux, and git pre-installed)
+- [x] **VM-01**: User can create a new per-repo VM with `rl new` (Alpine Linux via aq, with Claude Code, Codex, tmux, and git pre-installed)
 - [x] **VM-02**: User can destroy a VM and clean up resources with `rl rm`
 - [x] **VM-03**: User can check if current repo has an attached airlock with `rl status`
 
 ### Session Management
 
-- [ ] **SESS-01**: User can SSH into VM and start or resume a tmux coding session with `rl code`
+- [x] **SESS-01**: User can SSH into VM and start or resume a tmux coding session with `rl code`
 
 ### Code Bridge
 
@@ -64,10 +64,10 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| VM-01 | Phase 1 | Pending |
+| VM-01 | Phase 1 | Complete |
 | VM-02 | Phase 1 | Complete |
 | VM-03 | Phase 1 | Complete |
-| SESS-01 | Phase 1 | Pending |
+| SESS-01 | Phase 1 | Complete |
 | CODE-01 | Phase 4 | Pending |
 | SEC-01 | Phase 2 | Pending |
 | SEC-02 | Phase 2 | Pending |
