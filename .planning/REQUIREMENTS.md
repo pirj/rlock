@@ -1,7 +1,7 @@
 # Requirements: AILockr
 
 **Defined:** 2026-03-24
-**Core Value:** AI agents can run in full "danger mode" without risking the host machine — code stays isolated, secrets stay on the host, and the only bridge is git.
+**Core Value:** AI agents can run in full "danger mode" without risking the host machine -- code stays isolated, secrets stay on the host, and the only bridge is git.
 
 ## v1 Requirements
 
@@ -64,22 +64,22 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| VM-01 | Pending | Pending |
-| VM-02 | Pending | Pending |
-| VM-03 | Pending | Pending |
-| SESS-01 | Pending | Pending |
-| CODE-01 | Pending | Pending |
-| SEC-01 | Pending | Pending |
-| SEC-02 | Pending | Pending |
-| SEC-03 | Pending | Pending |
-| AGENT-01 | Pending | Pending |
-| AGENT-02 | Pending | Pending |
+| VM-01 | Phase 1 | Pending |
+| VM-02 | Phase 1 | Pending |
+| VM-03 | Phase 1 | Pending |
+| SESS-01 | Phase 1 | Pending |
+| CODE-01 | Phase 4 | Pending |
+| SEC-01 | Phase 2 | Pending |
+| SEC-02 | Phase 2 | Pending |
+| SEC-03 | Phase 2 | Pending |
+| AGENT-01 | Phase 3 | Pending |
+| AGENT-02 | Phase 3 | Pending |
 
 **Coverage:**
 - v1 requirements: 10 total
-- Mapped to phases: 0
-- Unmapped: 10 ⚠️
+- Mapped to phases: 10
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-24*
-*Last updated: 2026-03-24 after initial definition*
+*Last updated: 2026-03-24 after roadmap creation*
