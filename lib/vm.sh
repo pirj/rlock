@@ -39,6 +39,72 @@ cmd_status() {
     fi
 }
 
+cmd_new() {
+    local vm_name
+    vm_name=$(get_vm_name)
+
+    # Check if VM already exists for this repo (D-03)
+    if [ -f "$RL_DIR/vm-name" ]; then
+        local saved
+        saved=$(get_saved_vm_name)
+        if [ "$saved" = "$vm_name" ]; then
+            die "VM already exists. Use 'rl code' to connect or 'rl rm' to destroy."
+        fi
+    fi
+
+    # Check cross-repo collision (Pitfall 2)
+    if [ -d "$AQ_STATE_DIR/$vm_name" ]; then
+        die "A VM named '$vm_name' already exists (from another repo). Rename this directory to avoid collision."
+    fi
+
+    # Create VM
+    spinner_start "Creating VM"
+    if ! aq new "$vm_name" 2>/dev/null; then
+        spinner_stop "Failed"
+        die "Failed to create VM '$vm_name'."
+    fi
+    spinner_stop "VM created"
+
+    # Start VM
+    spinner_start "Booting VM"
+    if ! aq start "$vm_name" 2>/dev/null; then
+        spinner_stop "Failed"
+        die "Failed to boot VM '$vm_name'."
+    fi
+    spinner_stop "VM booted"
+
+    # Wait for SSH
+    spinner_start "Waiting for SSH"
+    if ! wait_for_ssh "$vm_name" 60; then
+        spinner_stop "Failed"
+        die "SSH not available after 60s. VM may have failed to boot."
+    fi
+    spinner_stop "SSH ready"
+
+    # Provision guest (VM-01)
+    spinner_start "Installing packages"
+    local provision_output
+    provision_output=$(aq exec "$vm_name" <<'PROVISION'
+set -e
+apk add --no-cache tmux git
+mkdir -p /root/repo
+echo "PROVISION_OK"
+PROVISION
+    )
+    if ! echo "$provision_output" | grep -q "PROVISION_OK"; then
+        spinner_stop "Failed"
+        die "Guest provisioning failed. Try 'rl rm' and 'rl new' again."
+    fi
+    spinner_stop "Packages installed"
+
+    # Save state
+    save_vm_name "$vm_name"
+
+    # Final output
+    success "Airlock '$vm_name' ready"
+    info "Run 'rl code' to connect"
+}
+
 cmd_rm() {
     local vm_name
     vm_name=$(get_saved_vm_name) || die "No airlock for this repo. Run 'rl new' first."

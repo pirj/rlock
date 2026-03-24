@@ -35,11 +35,13 @@ shift 2>/dev/null || true
 case "$cmd" in
     new)
         . "$LIB_DIR/vm.sh"
-        # . "$LIB_DIR/ssh.sh"  # Created in Plan 02
-        die "Command 'new' not yet implemented."
+        . "$LIB_DIR/ssh.sh"
+        cmd_new "$@"
         ;;
     code)
-        die "Command 'code' not yet implemented."
+        . "$LIB_DIR/vm.sh"
+        . "$LIB_DIR/ssh.sh"
+        cmd_code "$@"
         ;;
     status)
         . "$LIB_DIR/vm.sh"
