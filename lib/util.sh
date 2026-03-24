@@ -47,6 +47,27 @@ get_saved_vm_name() {
     fi
 }
 
+# resolve_vm_name -- tries get_saved_vm_name first, then falls back to
+# get_vm_name if a matching VM exists in aq state. Handles orphaned VMs
+# from failed rl new attempts gracefully.
+resolve_vm_name() {
+    local saved
+    if saved=$(get_saved_vm_name); then
+        printf '%s' "$saved"
+        return 0
+    fi
+
+    # Fallback: check if a VM matching the directory name exists
+    local derived
+    derived=$(get_vm_name)
+    if [ -d "$AQ_STATE_DIR/$derived" ]; then
+        printf '%s' "$derived"
+        return 0
+    fi
+
+    return 1
+}
+
 save_vm_name() {
     ensure_rl_dir
     printf '%s' "$1" > "$RL_DIR/vm-name"

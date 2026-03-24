@@ -41,7 +41,7 @@ wait_for_ssh() {
 
 cmd_code() {
     local vm_name
-    vm_name=$(get_saved_vm_name) || die "No airlock for this repo. Run 'rl new' first."
+    vm_name=$(resolve_vm_name) || die "No airlock for this repo. Run 'rl new' first."
 
     if ! [ -d "$AQ_STATE_DIR/$vm_name" ]; then
         die "VM '$vm_name' not found. Run 'rl new' to create."

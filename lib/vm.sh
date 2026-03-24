@@ -18,7 +18,7 @@ is_vm_running() {
 
 cmd_status() {
     local vm_name
-    vm_name=$(get_saved_vm_name) || die "No airlock for this repo. Run 'rl new' first."
+    vm_name=$(resolve_vm_name) || die "No airlock for this repo. Run 'rl new' first."
 
     if ! [ -d "$AQ_STATE_DIR/$vm_name" ]; then
         printf '%s: %snot found%s (VM may have been removed externally)\n' \
@@ -53,7 +53,11 @@ cmd_new() {
     fi
 
     # Check cross-repo collision (Pitfall 2)
-    if [ -d "$AQ_STATE_DIR/$vm_name" ]; then
+    # If a VM with this name exists but .rl/vm-name does not, it could be
+    # from a failed prior rl new in THIS repo (orphaned VM). Offer cleanup.
+    if [ -d "$AQ_STATE_DIR/$vm_name" ] && [ ! -f "$RL_DIR/vm-name" ]; then
+        die "A VM named '$vm_name' already exists (possibly from a failed 'rl new'). Run 'rl rm' to clean up, then retry."
+    elif [ -d "$AQ_STATE_DIR/$vm_name" ]; then
         die "A VM named '$vm_name' already exists (from another repo). Rename this directory to avoid collision."
     fi
 
@@ -65,11 +69,14 @@ cmd_new() {
     fi
     spinner_stop "VM created"
 
+    # Save state early so rl rm can always clean up, even if later steps fail
+    save_vm_name "$vm_name"
+
     # Start VM
     spinner_start "Booting VM"
     if ! aq start "$vm_name" 2>/dev/null; then
         spinner_stop "Failed"
-        die "Failed to boot VM '$vm_name'."
+        die "Failed to boot VM '$vm_name'. Run 'rl rm' to clean up."
     fi
     spinner_stop "VM booted"
 
@@ -77,7 +84,7 @@ cmd_new() {
     spinner_start "Waiting for SSH"
     if ! wait_for_ssh "$vm_name" 60; then
         spinner_stop "Failed"
-        die "SSH not available after 60s. VM may have failed to boot."
+        die "SSH not available after 60s. VM may have failed to boot. Run 'rl rm' to clean up."
     fi
     spinner_stop "SSH ready"
 
@@ -93,12 +100,9 @@ PROVISION
     )
     if ! echo "$provision_output" | grep -q "PROVISION_OK"; then
         spinner_stop "Failed"
-        die "Guest provisioning failed. Try 'rl rm' and 'rl new' again."
+        die "Guest provisioning failed. Run 'rl rm' and 'rl new' to retry."
     fi
     spinner_stop "Packages installed"
-
-    # Save state
-    save_vm_name "$vm_name"
 
     # Final output
     success "Airlock '$vm_name' ready"
@@ -107,7 +111,7 @@ PROVISION
 
 cmd_rm() {
     local vm_name
-    vm_name=$(get_saved_vm_name) || die "No airlock for this repo. Run 'rl new' first."
+    vm_name=$(resolve_vm_name) || die "No airlock for this repo. Run 'rl new' first."
 
     if [ -d "$AQ_STATE_DIR/$vm_name" ]; then
         aq rm "$vm_name" || warn "aq rm failed for '$vm_name' -- continuing cleanup"
