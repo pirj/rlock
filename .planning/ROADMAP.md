@@ -29,7 +29,10 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. User can run `rl status` and see whether the current repo has an attached airlock and its state
   4. User can run `rl rm` and the VM plus all associated resources are cleaned up
   5. The `rl` CLI dispatches subcommands via a modular lib/ structure with ShellCheck-clean code
-**Plans**: TBD
+**Plans:** 2 plans
+Plans:
+- [ ] 01-01-PLAN.md -- CLI skeleton, shared modules (util.sh, ui.sh), status and rm commands
+- [ ] 01-02-PLAN.md -- VM creation (rl new), session connect (rl code), end-to-end verification
 
 ### Phase 2: Security Boundary
 **Goal**: API keys never enter the VM; a host-side Caddy reverse proxy injects Authorization headers so AI agents can call APIs without possessing secrets
@@ -69,7 +72,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. CLI Skeleton and VM Lifecycle | 0/0 | Not started | - |
+| 1. CLI Skeleton and VM Lifecycle | 0/2 | Planning complete | - |
 | 2. Security Boundary | 0/0 | Not started | - |
 | 3. Agent Provisioning | 0/0 | Not started | - |
 | 4. Code Bridge | 0/0 | Not started | - |
