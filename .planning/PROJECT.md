@@ -12,12 +12,13 @@ AI agents can run in full "danger mode" without risking the host machine — cod
 
 ### Validated
 
-(None yet — ship to validate)
+- [x] User can create a new per-repo VM with `rl new` — Validated in Phase 1: cli-skeleton-and-vm-lifecycle
+- [x] User can SSH into the VM and start/resume a coding session with `rl code` — Validated in Phase 1: cli-skeleton-and-vm-lifecycle
 
 ### Active
 
-- [ ] User can create a new per-repo VM with `rl new` that has Claude Code, Codex, tmux, and git installed (Alpine Linux via aq)
-- [ ] User can SSH into the VM and start/resume a coding session with `rl code`
+- [x] User can create a new per-repo VM with `rl new` that has Claude Code, Codex, tmux, and git installed (Alpine Linux via aq) — Phase 1
+- [x] User can SSH into the VM and start/resume a coding session with `rl code` — Phase 1
 - [ ] Host adds guest as a git remote — guest has no GitHub access, only local git
 - [ ] API keys stay on the host; Caddy proxy injects Authorization headers for Anthropic and OpenAI APIs
 - [ ] Guest Claude Code/Codex configured to use host proxy via custom API base URL env vars (ANTHROPIC_BASE_URL, OPENAI_BASE_URL)
@@ -81,4 +82,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-03-24 after initialization*
+*Last updated: 2026-03-25 after Phase 1 completion — CLI skeleton with rl new/code/status/rm*
