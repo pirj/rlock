@@ -34,6 +34,7 @@ shift 2>/dev/null || true
 # Dispatch
 case "$cmd" in
     new)
+        . "$LIB_DIR/proxy.sh"
         . "$LIB_DIR/vm.sh"
         . "$LIB_DIR/ssh.sh"
         cmd_new "$@"

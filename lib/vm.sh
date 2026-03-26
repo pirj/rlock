@@ -3,6 +3,8 @@
 # This file is sourced by the rl entry point. Do not execute directly.
 # Requires util.sh and ui.sh to be sourced first.
 
+# shellcheck shell=bash
+
 # --- VM State ---
 
 is_vm_running() {
@@ -61,6 +63,11 @@ cmd_new() {
         die "A VM named '$vm_name' already exists (from another repo). Rename this directory to avoid collision."
     fi
 
+    # Ensure Caddy proxy is running (SEC-01)
+    spinner_start "Starting API proxy"
+    ensure_caddy_running
+    spinner_stop "API proxy ready"
+
     # Create VM
     spinner_start "Creating VM"
     if ! aq new "$vm_name" 2>/dev/null; then
@@ -88,12 +95,35 @@ cmd_new() {
     fi
     spinner_stop "SSH ready"
 
-    # Provision guest (VM-01)
-    spinner_start "Installing packages"
+    # Provision guest (VM-01, SEC-02, SEC-03)
+    spinner_start "Provisioning guest"
     local provision_output
     provision_output=$(aq exec "$vm_name" <<'PROVISION'
 set -e
-apk add --no-cache tmux git
+
+# Base packages (Phase 1)
+apk add --no-cache tmux git bash curl
+
+# Enable community repository for mise (Pitfall 3: community repo not enabled by default in aq)
+sed -i 's|^#\(.*community\)|\1|' /etc/apk/repositories
+apk update
+
+# Install mise-en-place for environment variable management (D-11)
+apk add --no-cache mise
+
+# Generate mise.toml with proxy URLs and dummy API keys (D-12, D-13)
+cat > /root/mise.toml <<'MISE'
+[env]
+ANTHROPIC_BASE_URL = "http://10.0.2.2:9110"
+OPENAI_BASE_URL = "http://10.0.2.2:9111"
+ANTHROPIC_API_KEY = "dummy"
+OPENAI_API_KEY = "dummy"
+MISE
+
+# Activate mise in shell profiles (ash for Alpine default, bash for agent tooling)
+echo 'eval "$(mise activate sh)"' >> /root/.profile
+echo 'eval "$(mise activate bash)"' >> /root/.bashrc
+
 mkdir -p /root/repo
 echo "PROVISION_OK"
 PROVISION
@@ -102,7 +132,7 @@ PROVISION
         spinner_stop "Failed"
         die "Guest provisioning failed. Run 'rl rm' and 'rl new' to retry."
     fi
-    spinner_stop "Packages installed"
+    spinner_stop "Guest provisioned"
 
     # Final output
     success "Airlock '$vm_name' ready"
