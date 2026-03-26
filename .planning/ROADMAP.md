@@ -46,7 +46,7 @@ Plans:
 **Plans:** 2 plans
 Plans:
 - [x] 02-01-PLAN.md -- Caddy proxy module (lib/proxy.sh), Caddyfile generation, dependency check
-- [ ] 02-02-PLAN.md -- Integrate proxy into rl new, guest mise provisioning, end-to-end verification
+- [x] 02-02-PLAN.md -- Integrate proxy into rl new, guest mise provisioning, end-to-end verification
 
 ### Phase 3: Agent Provisioning
 **Goal**: Claude Code and Codex are installed and functional inside the VM, routing API calls through the host proxy
