@@ -39,11 +39,14 @@ Plans:
 **Depends on**: Phase 1
 **Requirements**: SEC-01, SEC-02, SEC-03
 **Success Criteria** (what must be TRUE):
-  1. Caddy reverse proxy starts automatically during `rl new`, listening on a per-VM port with IP-restricted access (10.0.2.0/24 and 127.0.0.1 only)
-  2. HTTP requests from inside the VM to http://10.0.2.2:<port> arrive at upstream Anthropic/OpenAI APIs with correct Authorization headers injected
+  1. Caddy reverse proxy starts automatically during `rl new`, listening on fixed ports (9110 for Anthropic, 9111 for OpenAI) bound to 127.0.0.1
+  2. HTTP requests from inside the VM to http://10.0.2.2:9110 and http://10.0.2.2:9111 arrive at upstream Anthropic/OpenAI APIs with correct auth headers injected (x-api-key for Anthropic, Authorization: Bearer for OpenAI)
   3. No API key, token, or credential exists anywhere inside the VM -- not in env vars, config files, shell history, or process memory
-  4. Caddy lifecycle is tied to VM lifecycle -- proxy starts with `rl new`, stops with `rl rm`
-**Plans**: TBD
+  4. Caddy is a shared instance -- starts with first `rl new`, stays running across VM lifecycle (not stopped on `rl rm`)
+**Plans:** 2 plans
+Plans:
+- [ ] 02-01-PLAN.md -- Caddy proxy module (lib/proxy.sh), Caddyfile generation, dependency check
+- [ ] 02-02-PLAN.md -- Integrate proxy into rl new, guest mise provisioning, end-to-end verification
 
 ### Phase 3: Agent Provisioning
 **Goal**: Claude Code and Codex are installed and functional inside the VM, routing API calls through the host proxy
@@ -73,6 +76,6 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. CLI Skeleton and VM Lifecycle | 0/2 | Planning complete | - |
-| 2. Security Boundary | 0/0 | Not started | - |
+| 2. Security Boundary | 0/2 | Planning complete | - |
 | 3. Agent Provisioning | 0/0 | Not started | - |
 | 4. Code Bridge | 0/0 | Not started | - |
