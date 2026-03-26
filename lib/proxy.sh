@@ -1,7 +1,7 @@
 # proxy.sh -- Caddy reverse proxy lifecycle management
 #
 # This file is sourced by the rl entry point. Do not execute directly.
-# Requires util.sh and ui.sh to be sourced first (for die(), info(), warn()).
+# Requires util.sh, ui.sh, and creds.sh to be sourced first.
 
 # shellcheck shell=bash
 
@@ -17,55 +17,58 @@ OPENAI_PORT=9111
 
 generate_caddyfile() {
     mkdir -p "$CADDY_CONFIG_DIR"
-    # Single-quoted heredoc so {env.*} placeholders are written literally,
-    # not expanded by bash. Caddy reads them at runtime.
-    cat > "$CADDY_FILE" <<'CADDYFILE'
+
+    # Resolve credentials from store or env vars
+    local anthropic_key openai_key
+    anthropic_key=$(creds_resolve "ANTHROPIC_API_KEY" 2>/dev/null) || true
+    openai_key=$(creds_resolve "OPENAI_API_KEY" 2>/dev/null) || true
+
+    # Write actual key values into the Caddyfile (not env var references).
+    # Caddy reads {env.*} only at startup, so keys exported after Caddy starts
+    # would be invisible. Writing actual values + caddy reload solves this.
+    # File is chmod 600 by ensure_caddy_running.
+    cat > "$CADDY_FILE" <<CADDYFILE
 {
     admin localhost:2020
 }
 
-http://127.0.0.1:9110 {
+http://127.0.0.1:${ANTHROPIC_PORT} {
     reverse_proxy https://api.anthropic.com {
-        header_up x-api-key "{env.ANTHROPIC_API_KEY}"
+        header_up x-api-key "${anthropic_key}"
         header_up Host api.anthropic.com
     }
 }
 
-http://127.0.0.1:9111 {
+http://127.0.0.1:${OPENAI_PORT} {
     reverse_proxy https://api.openai.com {
-        header_up Authorization "Bearer {env.OPENAI_API_KEY}"
+        header_up Authorization "Bearer ${openai_key}"
         header_up Host api.openai.com
     }
 }
 CADDYFILE
+    chmod 600 "$CADDY_FILE"
 }
 
 # --- Caddy Detection ---
 
 is_caddy_running() {
-    # Port probe is more reliable than pgrep or caddy status (not a real subcommand).
-    # Checks if the Anthropic proxy port is responding.
+    # Port probe: checks if the Anthropic proxy port is responding.
     curl -sf -o /dev/null --connect-timeout 1 "http://127.0.0.1:$ANTHROPIC_PORT" 2>/dev/null
 }
 
 # --- Caddy Lifecycle ---
 
 ensure_caddy_running() {
-    # Idempotent guard: skip if already running
+    # Always regenerate the Caddyfile to pick up credential changes
+    generate_caddyfile
+
     if is_caddy_running; then
+        # Caddy is running — reload config to pick up any key changes
+        caddy reload --config "$CADDY_FILE" --adapter caddyfile 2>/dev/null || true
         return 0
     fi
 
-    # Warn if no API keys are set, but don't block — OAuth sidecar
-    # or later key export will provide credentials at runtime.
-    if [ -z "${ANTHROPIC_API_KEY:-}" ] && [ -z "${OPENAI_API_KEY:-}" ]; then
-        warn "No API keys set (ANTHROPIC_API_KEY, OPENAI_API_KEY). Proxy will start but API calls will fail until keys are exported."
-    fi
-
-    if [ ! -f "$CADDY_FILE" ]; then
-        generate_caddyfile
-    fi
-
+    # Start Caddy
     caddy start --config "$CADDY_FILE" --adapter caddyfile 2>/dev/null \
         || return 1
 
