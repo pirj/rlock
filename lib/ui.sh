@@ -3,6 +3,8 @@
 # This file is sourced by the rl entry point. Do not execute directly.
 # Colors are initialized automatically when this file is sourced.
 
+# shellcheck shell=bash
+
 # --- Color Auto-Detection (D-09) ---
 
 setup_colors() {
@@ -63,7 +65,7 @@ spinner_start() {
 spinner_stop() {
     if [ -n "$SPINNER_PID" ]; then
         kill "$SPINNER_PID" 2>/dev/null
-        wait "$SPINNER_PID" 2>/dev/null
+        wait "$SPINNER_PID" 2>/dev/null || true
         SPINNER_PID=""
         printf '\r  %s✓%s %s\n' "$GREEN" "$RESET" "$1" >&2
     else
