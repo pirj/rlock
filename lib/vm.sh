@@ -64,9 +64,8 @@ cmd_new() {
     fi
 
     # Ensure Caddy proxy is running (SEC-01)
-    # Redirect stdout/stderr to suppress Caddy's own output during spinner
     spinner_start "Starting API proxy"
-    if ! ensure_caddy_running >/dev/null 2>&1; then
+    if ! ensure_caddy_running; then
         spinner_stop "Failed"
         die "Failed to start Caddy proxy. Check 'caddy validate --config $CADDY_FILE'."
     fi

@@ -52,8 +52,13 @@ CADDYFILE
 # --- Caddy Detection ---
 
 is_caddy_running() {
-    # Port probe: checks if the Anthropic proxy port is responding.
-    curl -sf -o /dev/null --connect-timeout 1 "http://127.0.0.1:$ANTHROPIC_PORT" 2>/dev/null
+    # Port probe: checks if Caddy is listening. Use -s (silent) without -f
+    # because the upstream API returns 404 for GET / which curl -f treats as failure.
+    # Any HTTP response (even 404) means Caddy is running.
+    local http_code
+    http_code=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 1 \
+        "http://127.0.0.1:$ANTHROPIC_PORT" 2>/dev/null) || return 1
+    [ "$http_code" != "000" ]
 }
 
 # --- Caddy Lifecycle ---
@@ -67,14 +72,14 @@ ensure_caddy_running() {
 
     if is_caddy_running; then
         # Caddy is running — reload config to pick up any key changes
-        caddy reload --config "$CADDY_FILE" --adapter caddyfile 2>/dev/null || true
+        caddy reload --config "$CADDY_FILE" --adapter caddyfile >/dev/null 2>&1 || true
         # Start refresh daemon for OAuth token lifecycle
         start_refresh_daemon 2>/dev/null || true
         return 0
     fi
 
-    # Start Caddy
-    caddy start --config "$CADDY_FILE" --adapter caddyfile 2>/dev/null \
+    # Start Caddy (suppress its chatty startup output)
+    caddy start --config "$CADDY_FILE" --adapter caddyfile >/dev/null 2>&1 \
         || return 1
 
     # Brief wait for Caddy to bind ports, then verify
