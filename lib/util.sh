@@ -3,6 +3,8 @@
 # This file is sourced by the rl entry point. Do not execute directly.
 # Requires ui.sh to be sourced first (for $RED, $RESET color variables).
 
+# shellcheck shell=bash
+
 # --- Constants ---
 
 RL_DIR=".rl"

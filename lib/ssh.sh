@@ -3,6 +3,8 @@
 # This file is sourced by the rl entry point. Do not execute directly.
 # Requires util.sh and ui.sh to be sourced first.
 
+# shellcheck shell=bash
+
 # --- SSH Connectivity ---
 
 wait_for_ssh() {
@@ -55,7 +57,7 @@ cmd_code() {
     fi
 
     local ssh_port
-    ssh_port=$(get_ssh_port "$vm_name") || die "VM '$vm_name' is not running. Run 'rl status' to check."
+    ssh_port=$(get_ssh_port "$vm_name") || die "SSH port not available for '$vm_name'. Try 'rl rm' and 'rl new'."
 
     # Connect with tmux attach-or-create (D-05, D-06, D-12)
     ssh -o ConnectTimeout=5 \

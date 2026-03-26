@@ -84,7 +84,7 @@ cmd_new() {
 
     # Start VM
     spinner_start "Booting VM"
-    if ! aq start "$vm_name" >/dev/null 2>&1; then
+    if ! aq start "$vm_name" 2>/dev/null; then
         spinner_stop "Failed"
         die "Failed to boot VM '$vm_name'. Run 'rl rm' to clean up."
     fi
