@@ -65,7 +65,10 @@ cmd_new() {
 
     # Ensure Caddy proxy is running (SEC-01)
     spinner_start "Starting API proxy"
-    ensure_caddy_running
+    if ! ensure_caddy_running; then
+        spinner_stop "Failed"
+        die "Failed to start Caddy proxy. Check 'caddy validate --config $CADDY_FILE'."
+    fi
     spinner_stop "API proxy ready"
 
     # Create VM

@@ -56,11 +56,10 @@ ensure_caddy_running() {
         return 0
     fi
 
-    # ANTHROPIC_API_KEY is required (D-08). OPENAI_API_KEY is optional --
-    # if unset, Caddy may insert an empty string for the OpenAI header.
-    # Users who don't have an OpenAI key simply won't use Codex.
-    if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
-        die "ANTHROPIC_API_KEY not set. Export it in your shell before running rl."
+    # Warn if no API keys are set, but don't block — OAuth sidecar
+    # or later key export will provide credentials at runtime.
+    if [ -z "${ANTHROPIC_API_KEY:-}" ] && [ -z "${OPENAI_API_KEY:-}" ]; then
+        warn "No API keys set (ANTHROPIC_API_KEY, OPENAI_API_KEY). Proxy will start but API calls will fail until keys are exported."
     fi
 
     if [ ! -f "$CADDY_FILE" ]; then
@@ -68,10 +67,9 @@ ensure_caddy_running() {
     fi
 
     caddy start --config "$CADDY_FILE" --adapter caddyfile 2>/dev/null \
-        || die "Failed to start Caddy proxy. Check 'caddy validate --config $CADDY_FILE'."
+        || return 1
 
     # Brief wait for Caddy to bind ports, then verify
     sleep 1
-    is_caddy_running \
-        || die "Caddy started but proxy not responding on port $ANTHROPIC_PORT."
+    is_caddy_running || return 1
 }
