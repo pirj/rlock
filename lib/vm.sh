@@ -84,7 +84,7 @@ cmd_new() {
 
     # Start VM
     spinner_start "Booting VM"
-    if ! aq start "$vm_name" 2>/dev/null; then
+    if ! aq start "$vm_name" >/dev/null 2>&1; then
         spinner_stop "Failed"
         die "Failed to boot VM '$vm_name'. Run 'rl rm' to clean up."
     fi
@@ -123,9 +123,9 @@ ANTHROPIC_API_KEY = "dummy"
 OPENAI_API_KEY = "dummy"
 MISE
 
-# Activate mise in shell profiles (ash for Alpine default, bash for agent tooling)
-echo 'eval "$(mise activate sh)"' >> /root/.profile
+# Activate mise in bash profile (agents use bash inside the VM)
 echo 'eval "$(mise activate bash)"' >> /root/.bashrc
+echo 'eval "$(mise activate bash)"' >> /root/.profile
 
 mkdir -p /root/repo
 echo "PROVISION_OK"
