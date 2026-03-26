@@ -45,7 +45,7 @@ Plans:
   4. Caddy is a shared instance -- starts with first `rl new`, stays running across VM lifecycle (not stopped on `rl rm`)
 **Plans:** 2 plans
 Plans:
-- [ ] 02-01-PLAN.md -- Caddy proxy module (lib/proxy.sh), Caddyfile generation, dependency check
+- [x] 02-01-PLAN.md -- Caddy proxy module (lib/proxy.sh), Caddyfile generation, dependency check
 - [ ] 02-02-PLAN.md -- Integrate proxy into rl new, guest mise provisioning, end-to-end verification
 
 ### Phase 3: Agent Provisioning

@@ -21,9 +21,9 @@
 
 ### Security
 
-- [ ] **SEC-01**: Caddy reverse proxy on host injects Authorization headers for Anthropic and OpenAI APIs
+- [x] **SEC-01**: Caddy reverse proxy on host injects Authorization headers for Anthropic and OpenAI APIs
 - [ ] **SEC-02**: Guest Claude Code/Codex configured to use host proxy via ANTHROPIC_BASE_URL / OPENAI_BASE_URL env vars pointing to 10.0.2.2
-- [ ] **SEC-03**: API keys never enter the VM in any form (not in env vars, config files, or process memory)
+- [x] **SEC-03**: API keys never enter the VM in any form (not in env vars, config files, or process memory)
 
 ### Agent Setup
 
@@ -69,9 +69,9 @@
 | VM-03 | Phase 1 | Complete |
 | SESS-01 | Phase 1 | Complete |
 | CODE-01 | Phase 4 | Pending |
-| SEC-01 | Phase 2 | Pending |
+| SEC-01 | Phase 2 | Complete |
 | SEC-02 | Phase 2 | Pending |
-| SEC-03 | Phase 2 | Pending |
+| SEC-03 | Phase 2 | Complete |
 | AGENT-01 | Phase 3 | Pending |
 | AGENT-02 | Phase 3 | Pending |
 
