@@ -59,12 +59,17 @@ is_caddy_running() {
 # --- Caddy Lifecycle ---
 
 ensure_caddy_running() {
+    # Refresh OAuth tokens if needed before generating config
+    refresh_if_needed
+
     # Always regenerate the Caddyfile to pick up credential changes
     generate_caddyfile
 
     if is_caddy_running; then
         # Caddy is running — reload config to pick up any key changes
         caddy reload --config "$CADDY_FILE" --adapter caddyfile 2>/dev/null || true
+        # Start refresh daemon for OAuth token lifecycle
+        start_refresh_daemon 2>/dev/null || true
         return 0
     fi
 
@@ -75,4 +80,7 @@ ensure_caddy_running() {
     # Brief wait for Caddy to bind ports, then verify
     sleep 1
     is_caddy_running || return 1
+
+    # Start refresh daemon for OAuth token lifecycle
+    start_refresh_daemon 2>/dev/null || true
 }
