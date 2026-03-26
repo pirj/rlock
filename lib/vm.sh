@@ -123,9 +123,11 @@ ANTHROPIC_API_KEY = "dummy"
 OPENAI_API_KEY = "dummy"
 MISE
 
+# Set bash as default shell (ash can't run mise activate output)
+sed -i 's|root:/bin/ash|root:/bin/bash|' /etc/passwd
+
 # Activate mise in bash profile (agents use bash inside the VM)
 echo 'eval "$(mise activate bash)"' >> /root/.bashrc
-echo 'eval "$(mise activate bash)"' >> /root/.profile
 
 mkdir -p /root/repo
 echo "PROVISION_OK"
