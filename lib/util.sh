@@ -31,6 +31,7 @@ check_all_deps() {
     check_dependency "git" "brew install git"
     check_dependency "ssh" "Install OpenSSH"
     check_dependency "tmux" "brew install tmux"
+    check_dependency "caddy" "brew install caddy"
 }
 
 # --- .rl/ State Management ---
