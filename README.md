@@ -1,4 +1,4 @@
-# rlock
+# ai.rlock
 
 Run AI coding agents in full "danger mode" — completely isolated inside QEMU virtual machines. Code stays in the VM, secrets stay on your machine, and the only bridge is git.
 
@@ -14,28 +14,23 @@ Containers (Docker) share the host kernel — a determined agent can escape. You
 
 ## How It Works
 
-`rl` creates a lightweight QEMU virtual machine per repository using [aq](https://github.com/pirj/aq) (Alpine Linux). The VM has no access to your host filesystem, credentials, or network identity.
+`rl` creates a lightweight virtual machine per repository using [aq](https://github.com/pirj/aq) (QEMU, Alpine Linux). The VM has no access to your host filesystem, credentials, or network identity.
 
 ```
 ┌─────────────────────────────────────┐
-│             Host Machine            │
-│                                     │
-│  ANTHROPIC_API_KEY=sk-ant-...       │
-│  OPENAI_API_KEY=sk-...              │
-│                                     │
-│  ┌───────────────┐                  │
-│  │  Caddy Proxy  │ :9110 Anthropic  │
-│  │  (injects     │ :9111 OpenAI     │
-│  │   auth hdrs)  │                  │
-│  └───────┬───────┘                  │
+│            Host Machine             │
+│  ┌────────────────┐                 │
+│  │ Caddy Proxy    │ :9110 Anthropic │
+│  │ (injects       │ :9111 OpenAI    │
+│  │  auth headers) │                 │
+│  └───────┬────────┘                 │
 │          │ 10.0.2.2                 │
 │  ════════╪══════════════════════    │
 │          │ QEMU VM                  │
 │  ┌───────┴───────────────────┐      │
-│  │  Alpine Linux             │      │
-│  │  ANTHROPIC_API_KEY=dummy  │      │
-│  │  Claude Code / Codex      │      │
 │  │  ↕ git only               │      │
+│  │  Alpine Linux             │      │
+│  │  Claude Code / Codex      │      │
 │  └───────────────────────────┘      │
 └─────────────────────────────────────┘
 ```
@@ -136,7 +131,5 @@ cd your-project
 rl new
 rl code
 ```
-
-## ai.rlock
 
 ## p.rlock
