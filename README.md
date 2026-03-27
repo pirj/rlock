@@ -12,6 +12,18 @@ AI coding agents like Claude Code and Codex are powerful but dangerous. They exe
 
 Containers (Docker) share the host kernel — a determined agent can escape. You need real isolation.
 
+### Supply Chain Risk
+
+AI agents install packages. Those packages can be compromised. When an agent runs `npm install` or `pip install` on your host, a backdoored dependency gets full access to your filesystem, credentials, and network.
+
+This isn't hypothetical:
+
+- **LiteLLM (March 2026)** — Attackers backdoored the [litellm PyPI package](https://docs.litellm.ai/blog/security-update-march-2026) (3.4M downloads/day) via a poisoned Trivy GitHub Action in CI/CD. The compromised versions included a credential stealer that exfiltrated API keys and environment variables — exactly the secrets AI proxy tools handle.
+- **event-stream (2018)** — A maintainer [transferred ownership](https://www.blackduck.com/blog/malicious-dependency-supply-chain.html) of a popular npm package (2M downloads/week) to a stranger who injected code targeting cryptocurrency wallets with balances over 100 BTC.
+- **PyTorch nightly (2022)** — A dependency confusion attack on `torchtriton` let attackers run arbitrary code on machines installing PyTorch nightly builds, exfiltrating hostname, username, and `.gitconfig`.
+
+With `rl`, a compromised package installs inside the VM. It sees dummy API keys, has no access to your host filesystem, and can't reach your SSH keys or git credentials. The blast radius is one disposable VM.
+
 ## How It Works
 
 `rl` creates a lightweight virtual machine per repository using [aq](https://github.com/pirj/aq) (QEMU, Alpine Linux). The VM has no access to your host filesystem, credentials, or network identity.
