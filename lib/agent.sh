@@ -55,26 +55,17 @@ apk add --no-cache nodejs npm libgcc libstdc++
 npm install -g @anthropic-ai/claude-code --cache /tmp/npm-cache
 rm -rf /tmp/npm-cache
 
-# Allow all tools — bypassPermissions is blocked when running as root,
-# so we allow each tool explicitly instead (same effect, no root check)
-mkdir -p /root/.claude
-cat > /root/.claude/settings.json <<'SETTINGS'
+# Configure bypassPermissions for the unprivileged ai user (D-07)
+su - ai -c '
+mkdir -p ~/.claude
+cat > ~/.claude/settings.json <<SETTINGS
 {
   "permissions": {
-    "allow": [
-      "Bash(*)",
-      "Edit",
-      "Write",
-      "Read",
-      "Glob",
-      "Grep",
-      "WebSearch",
-      "WebFetch",
-      "NotebookEdit"
-    ]
+    "defaultMode": "bypassPermissions"
   }
 }
 SETTINGS
+'
 
 # Verify installation
 claude --version >/dev/null 2>&1 || exit 1
@@ -97,10 +88,12 @@ npm install -g @openai/codex --cache /tmp/npm-cache
 rm -rf /tmp/npm-cache
 
 # Write config.toml for base URL (belt-and-suspenders with mise env var, Pitfall 5)
-mkdir -p /root/.codex
-cat > /root/.codex/config.toml <<'CODEXCFG'
+su - ai -c '
+mkdir -p ~/.codex
+cat > ~/.codex/config.toml <<CODEXCFG
 openai_base_url = "http://10.0.2.2:9111/v1"
 CODEXCFG
+'
 
 # Verify installation
 codex --version >/dev/null 2>&1 || exit 1

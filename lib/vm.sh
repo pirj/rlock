@@ -107,18 +107,24 @@ cmd_new() {
     provision_output=$(aq exec "$vm_name" <<'PROVISION'
 set -e
 
-# Base packages (Phase 1)
-apk add --no-cache tmux git bash curl
+# Base packages
+apk add --no-cache tmux git bash curl shadow sudo
 
-# Enable community repository for mise (Pitfall 3: community repo not enabled by default in aq)
+# Create unprivileged user for agent work (bypassPermissions blocked as root)
+adduser -D -s /bin/bash ai
+echo "ai ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+
+# Enable community repository for mise
 sed -i 's|^#\(.*community\)|\1|' /etc/apk/repositories
 apk update
 
-# Install mise-en-place for environment variable management (D-11)
+# Install mise-en-place for environment variable management
 apk add --no-cache mise
 
-# Generate mise.toml with proxy URLs and dummy API keys (D-12, D-13)
-cat > /root/mise.toml <<'MISE'
+# Set up ai user's home with mise, proxy URLs, and dummy API keys
+su - ai -c '
+set -e
+cat > ~/mise.toml <<MISE
 [env]
 ANTHROPIC_BASE_URL = "http://10.0.2.2:9110"
 OPENAI_BASE_URL = "http://10.0.2.2:9111"
@@ -126,17 +132,19 @@ ANTHROPIC_API_KEY = "dummy"
 OPENAI_API_KEY = "dummy"
 MISE
 
-# Trust mise.toml so env vars load without prompting the user
-mise trust /root/mise.toml
+mise trust ~/mise.toml
+echo "eval \"\$(mise activate bash)\"" >> ~/.bashrc
+echo "[ -f ~/.bashrc ] && . ~/.bashrc" >> ~/.bash_profile
+mkdir -p ~/repo
+'
 
-# Set bash as default shell (ash can't run mise activate output)
-sed -i 's|root:/bin/sh$|root:/bin/bash|' /etc/passwd
+# Allow SSH as ai user (aq sets up root SSH, copy authorized_keys)
+mkdir -p /home/ai/.ssh
+cp /root/.ssh/authorized_keys /home/ai/.ssh/
+chown -R ai:ai /home/ai/.ssh
+chmod 700 /home/ai/.ssh
+chmod 600 /home/ai/.ssh/authorized_keys
 
-# Activate mise in bash — .bash_profile sources .bashrc for login shells (tmux)
-echo 'eval "$(mise activate bash)"' >> /root/.bashrc
-echo '[ -f ~/.bashrc ] && . ~/.bashrc' >> /root/.bash_profile
-
-mkdir -p /root/repo
 echo "PROVISION_OK"
 PROVISION
     )

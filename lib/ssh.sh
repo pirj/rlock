@@ -30,7 +30,7 @@ wait_for_ssh() {
         if ssh -o ConnectTimeout=2 \
               -o StrictHostKeyChecking=no \
               -o UserKnownHostsFile=/dev/null \
-              -p "$port" root@localhost true 2>/dev/null; then
+              -p "$port" ai@localhost true 2>/dev/null; then
             return 0
         fi
         sleep 1
@@ -64,7 +64,7 @@ cmd_code() {
         -o StrictHostKeyChecking=no \
         -o UserKnownHostsFile=/dev/null \
         -p "$ssh_port" \
-        root@localhost \
-        -t "cd /root/repo 2>/dev/null; tmux new-session -A -s rl" \
+        ai@localhost \
+        -t "cd ~/repo 2>/dev/null; tmux new-session -A -s rl" \
       || die "SSH connection failed. Run 'rl status' to check VM state."
 }
