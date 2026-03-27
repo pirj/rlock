@@ -127,7 +127,7 @@ MISE
 mise trust /root/mise.toml
 
 # Set bash as default shell (ash can't run mise activate output)
-sed -i 's|root:/bin/ash|root:/bin/bash|' /etc/passwd
+sed -i 's|root:/bin/sh$|root:/bin/bash|' /etc/passwd
 
 # Activate mise in bash — .bash_profile sources .bashrc for login shells (tmux)
 echo 'eval "$(mise activate bash)"' >> /root/.bashrc
