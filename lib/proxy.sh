@@ -33,15 +33,15 @@ generate_caddyfile() {
 }
 
 http://127.0.0.1:${ANTHROPIC_PORT} {
+    request_header x-api-key "${anthropic_key}"
     reverse_proxy https://api.anthropic.com {
-        header_up x-api-key "${anthropic_key}"
         header_up Host api.anthropic.com
     }
 }
 
 http://127.0.0.1:${OPENAI_PORT} {
+    request_header Authorization "Bearer ${openai_key}"
     reverse_proxy https://api.openai.com {
-        header_up Authorization "Bearer ${openai_key}"
         header_up Host api.openai.com
     }
 }
