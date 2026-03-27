@@ -14,15 +14,18 @@ AI agents can run in full "danger mode" without risking the host machine — cod
 
 - [x] User can create a new per-repo VM with `rl new` — Validated in Phase 1: cli-skeleton-and-vm-lifecycle
 - [x] User can SSH into the VM and start/resume a coding session with `rl code` — Validated in Phase 1: cli-skeleton-and-vm-lifecycle
+- [x] API keys stay on the host; Caddy proxy injects auth headers — Validated in Phase 2: security-boundary
+- [x] Guest configured with proxy base URLs via mise — Validated in Phase 2: security-boundary
+- [x] Caddy listens on host, guest reaches it via QEMU gateway (10.0.2.2) — Validated in Phase 2: security-boundary
 
 ### Active
 
 - [x] User can create a new per-repo VM with `rl new` that has Claude Code, Codex, tmux, and git installed (Alpine Linux via aq) — Phase 1
 - [x] User can SSH into the VM and start/resume a coding session with `rl code` — Phase 1
 - [ ] Host adds guest as a git remote — guest has no GitHub access, only local git
-- [ ] API keys stay on the host; Caddy proxy injects Authorization headers for Anthropic and OpenAI APIs
-- [ ] Guest Claude Code/Codex configured to use host proxy via custom API base URL env vars (ANTHROPIC_BASE_URL, OPENAI_BASE_URL)
-- [ ] Caddy listens on host, guest reaches it via QEMU gateway (10.0.2.2)
+- [x] API keys stay on the host; Caddy proxy injects Authorization headers for Anthropic and OpenAI APIs — Phase 2
+- [x] Guest Claude Code/Codex configured to use host proxy via custom API base URL env vars (ANTHROPIC_BASE_URL, OPENAI_BASE_URL) — Phase 2
+- [x] Caddy listens on host, guest reaches it via QEMU gateway (10.0.2.2) — Phase 2
 - [ ] VM has internet access for documentation and package installation
 - [ ] Config file copying from host is opt-in and explicit (e.g. `rl new --config claude --config git`)
 - [ ] VM resource limits enforced (1GB disk, 1 vCPU — handled by aq defaults)
@@ -82,4 +85,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-03-25 after Phase 1 completion — CLI skeleton with rl new/code/status/rm*
+*Last updated: 2026-03-27 after Phase 2 completion — Caddy proxy, credential store, OAuth import, rl auth*
