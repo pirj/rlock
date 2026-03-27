@@ -5,23 +5,18 @@
 
 # shellcheck shell=bash
 
-# --- Host Validation ---
+# --- Host Detection ---
 
-# validate_agent_host -- warn (not block) if the host lacks the agent binary (D-02)
-validate_agent_host() {
-    local agent="$1"
-    case "$agent" in
-        claude)
-            if ! command -v claude >/dev/null 2>&1; then
-                warn "claude not found on host. The proxy may lack Anthropic credentials."
-            fi
-            ;;
-        codex)
-            if ! command -v codex >/dev/null 2>&1; then
-                warn "codex not found on host. The proxy may lack OpenAI credentials."
-            fi
-            ;;
-    esac
+# detect_host_agents -- find which agent binaries are available on the host
+# Populates the DETECTED_AGENTS array.
+detect_host_agents() {
+    DETECTED_AGENTS=()
+    if command -v claude >/dev/null 2>&1; then
+        DETECTED_AGENTS+=("claude")
+    fi
+    if command -v codex >/dev/null 2>&1; then
+        DETECTED_AGENTS+=("codex")
+    fi
 }
 
 # --- Guest Installation ---

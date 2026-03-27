@@ -16,7 +16,7 @@ cmd_help() {
 usage: rl <command>
 
 commands:
-  new      Create a new isolated VM for the current repo (--agent claude|codex)
+  new      Create a new isolated VM for the current repo
   code     Connect to the VM's coding session
   status   Show the current repo's airlock status
   rm       Destroy the VM and clean up resources

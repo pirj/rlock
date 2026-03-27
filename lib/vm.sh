@@ -42,40 +42,8 @@ cmd_status() {
 }
 
 cmd_new() {
-    # Parse --agent flags (AGENT-01, D-01)
-    local agents=()
-
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --agent)
-                [[ -z "${2:-}" ]] && die "--agent requires a value (claude, codex)"
-                case "$2" in
-                    claude|codex) agents+=("$2") ;;
-                    *) die "Unknown agent '$2'. Use 'claude' or 'codex'." ;;
-                esac
-                shift 2
-                ;;
-            --help|-h)
-                cat <<'EOF'
-usage: rl new [--agent <name>]...
-
-Create a new isolated VM for the current repo.
-
-options:
-  --agent <name>   Install an AI agent (claude, codex). Can be repeated.
-
-examples:
-  rl new --agent claude
-  rl new --agent claude --agent codex
-  rl new
-EOF
-                return 0
-                ;;
-            *)
-                die "Unknown option '$1'. Run 'rl new --help' for usage."
-                ;;
-        esac
-    done
+    # Detect which agents are available on the host
+    detect_host_agents
 
     local vm_name
     vm_name=$(get_vm_name)
@@ -178,19 +146,20 @@ PROVISION
     fi
     spinner_stop "Guest provisioned"
 
-    # Install requested agents (AGENT-01)
-    for agent in "${agents[@]}"; do
-        validate_agent_host "$agent"
-        spinner_start "Installing $agent"
-        local install_output
-        install_output=$(install_agent_in_guest "$vm_name" "$agent")
-        if echo "$install_output" | grep -q "AGENT_OK"; then
-            spinner_stop "$agent installed"
-        else
-            spinner_stop "Failed"
-            warn "Failed to install $agent. VM is usable without it."
-        fi
-    done
+    # Install agents detected on the host (AGENT-01)
+    if [ ${#DETECTED_AGENTS[@]} -gt 0 ]; then
+        for agent in "${DETECTED_AGENTS[@]}"; do
+            spinner_start "Installing $agent"
+            local install_output
+            install_output=$(install_agent_in_guest "$vm_name" "$agent")
+            if echo "$install_output" | grep -q "AGENT_OK"; then
+                spinner_stop "$agent installed"
+            else
+                spinner_stop "Failed"
+                warn "Failed to install $agent. VM is usable without it."
+            fi
+        done
+    fi
 
     # Final output
     success "Airlock '$vm_name' ready"
