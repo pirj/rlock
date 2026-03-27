@@ -123,6 +123,9 @@ ANTHROPIC_API_KEY = "dummy"
 OPENAI_API_KEY = "dummy"
 MISE
 
+# Trust mise.toml so env vars load without prompting the user
+mise trust /root/mise.toml
+
 # Set bash as default shell (ash can't run mise activate output)
 sed -i 's|root:/bin/ash|root:/bin/bash|' /etc/passwd
 
