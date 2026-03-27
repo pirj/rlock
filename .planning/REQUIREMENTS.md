@@ -27,7 +27,7 @@
 
 ### Agent Setup
 
-- [ ] **AGENT-01**: Claude Code is pre-installed and functional inside the VM
+- [x] **AGENT-01**: Claude Code is pre-installed and functional inside the VM
 - [ ] **AGENT-02**: Codex is pre-installed and functional inside the VM
 
 ## v2 Requirements
@@ -72,7 +72,7 @@
 | SEC-01 | Phase 2 | Complete |
 | SEC-02 | Phase 2 | Pending |
 | SEC-03 | Phase 2 | Complete |
-| AGENT-01 | Phase 3 | Pending |
+| AGENT-01 | Phase 3 | Complete |
 | AGENT-02 | Phase 3 | Pending |
 
 **Coverage:**

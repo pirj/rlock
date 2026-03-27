@@ -58,7 +58,7 @@ Plans:
   3. ANTHROPIC_BASE_URL and OPENAI_BASE_URL env vars are automatically configured to point to the host proxy (http://10.0.2.2:<port>)
 **Plans:** 1 plan
 Plans:
-- [ ] 03-01-PLAN.md -- Agent module (lib/agent.sh), --agent flag in rl new, Claude Code + Codex installation
+- [x] 03-01-PLAN.md -- Agent module (lib/agent.sh), --agent flag in rl new, Claude Code + Codex installation
 
 ### Phase 4: Code Bridge
 **Goal**: Code moves between host and guest exclusively via git, completing the airlock
