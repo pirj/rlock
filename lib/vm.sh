@@ -129,8 +129,9 @@ mise trust /root/mise.toml
 # Set bash as default shell (ash can't run mise activate output)
 sed -i 's|root:/bin/ash|root:/bin/bash|' /etc/passwd
 
-# Activate mise in bash profile (agents use bash inside the VM)
+# Activate mise in bash — .bash_profile sources .bashrc for login shells (tmux)
 echo 'eval "$(mise activate bash)"' >> /root/.bashrc
+echo '[ -f ~/.bashrc ] && . ~/.bashrc' >> /root/.bash_profile
 
 mkdir -p /root/repo
 echo "PROVISION_OK"
