@@ -56,7 +56,9 @@ Plans:
   1. Claude Code runs inside the VM and successfully completes an API call routed through the host Caddy proxy
   2. Codex runs inside the VM and successfully completes an API call routed through the host Caddy proxy
   3. ANTHROPIC_BASE_URL and OPENAI_BASE_URL env vars are automatically configured to point to the host proxy (http://10.0.2.2:<port>)
-**Plans**: TBD
+**Plans:** 1 plan
+Plans:
+- [ ] 03-01-PLAN.md -- Agent module (lib/agent.sh), --agent flag in rl new, Claude Code + Codex installation
 
 ### Phase 4: Code Bridge
 **Goal**: Code moves between host and guest exclusively via git, completing the airlock
@@ -77,5 +79,5 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4
 |-------|----------------|--------|-----------|
 | 1. CLI Skeleton and VM Lifecycle | 0/2 | Planning complete | - |
 | 2. Security Boundary | 0/2 | Planning complete | - |
-| 3. Agent Provisioning | 0/0 | Not started | - |
+| 3. Agent Provisioning | 0/1 | Planning complete | - |
 | 4. Code Bridge | 0/0 | Not started | - |
