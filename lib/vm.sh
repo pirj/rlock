@@ -116,6 +116,7 @@ apk add --no-cache tmux git bash curl sudo mise
 
 # Create unprivileged user for agent work (bypassPermissions blocked as root)
 adduser -D -s /bin/bash ai
+passwd -u ai                         # unlock account (adduser -D locks it, sshd rejects locked users)
 echo "ai ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
 
 # Set up ai user's home with mise, proxy URLs, and dummy API keys
