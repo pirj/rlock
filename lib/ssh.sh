@@ -30,7 +30,7 @@ wait_for_ssh() {
         if ssh -o ConnectTimeout=2 \
               -o StrictHostKeyChecking=no \
               -o UserKnownHostsFile=/dev/null \
-              -p "$port" ai@localhost true 2>/dev/null; then
+              -p "$port" root@localhost true 2>/dev/null; then
             return 0
         fi
         sleep 1
