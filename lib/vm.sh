@@ -107,19 +107,16 @@ cmd_new() {
     provision_output=$(aq exec "$vm_name" <<'PROVISION'
 set -e
 
+# Enable community repository first (sudo, mise live there)
+sed -i 's|^#\(.*community\)|\1|' /etc/apk/repositories
+apk update
+
 # Base packages
-apk add --no-cache tmux git bash curl shadow sudo
+apk add --no-cache tmux git bash curl sudo mise
 
 # Create unprivileged user for agent work (bypassPermissions blocked as root)
 adduser -D -s /bin/bash ai
 echo "ai ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
-
-# Enable community repository for mise
-sed -i 's|^#\(.*community\)|\1|' /etc/apk/repositories
-apk update
-
-# Install mise-en-place for environment variable management
-apk add --no-cache mise
 
 # Set up ai user's home with mise, proxy URLs, and dummy API keys
 su - ai -c '
