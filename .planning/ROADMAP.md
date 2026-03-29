@@ -70,7 +70,7 @@ Plans:
   3. No filesystem mounts, shared directories, or non-git data channels exist between host and guest
 **Plans:** 1 plan
 Plans:
-- [ ] 04-01-PLAN.md -- Git bridge in cmd_new (guest repo init, host remote add, push) and cmd_rm cleanup
+- [x] 04-01-PLAN.md -- Git bridge in cmd_new (guest repo init, host remote add, push) and cmd_rm cleanup
 
 ## Progress
 

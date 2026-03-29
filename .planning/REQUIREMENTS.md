@@ -17,7 +17,7 @@
 
 ### Code Bridge
 
-- [ ] **CODE-01**: Host adds guest as a git remote; code moves between host and guest exclusively via git (fetch-based workflow)
+- [x] **CODE-01**: Host adds guest as a git remote; code moves between host and guest exclusively via git (fetch-based workflow)
 
 ### Security
 
@@ -68,7 +68,7 @@
 | VM-02 | Phase 1 | Complete |
 | VM-03 | Phase 1 | Complete |
 | SESS-01 | Phase 1 | Complete |
-| CODE-01 | Phase 4 | Pending |
+| CODE-01 | Phase 4 | Complete |
 | SEC-01 | Phase 2 | Complete |
 | SEC-02 | Phase 2 | Pending |
 | SEC-03 | Phase 2 | Complete |
