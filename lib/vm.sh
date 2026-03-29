@@ -211,6 +211,10 @@ cmd_rm() {
     local vm_name
     vm_name=$(resolve_vm_name) || die "No airlock for this repo. Run 'rl new' first."
 
+    # Remove git remote and SSH config before VM cleanup (D-03)
+    git remote remove rl 2>/dev/null || true
+    git config --local --unset core.sshCommand 2>/dev/null || true
+
     if [ -d "$AQ_STATE_DIR/$vm_name" ]; then
         aq rm "$vm_name" || warn "aq rm failed for '$vm_name' -- continuing cleanup"
     else
