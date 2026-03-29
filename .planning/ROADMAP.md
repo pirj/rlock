@@ -68,7 +68,9 @@ Plans:
   1. Host has a git remote pointing to the guest VM, added automatically during `rl new`
   2. User can fetch commits made by AI agents inside the VM to the host repo using standard git commands
   3. No filesystem mounts, shared directories, or non-git data channels exist between host and guest
-**Plans**: TBD
+**Plans:** 1 plan
+Plans:
+- [ ] 04-01-PLAN.md -- Git bridge in cmd_new (guest repo init, host remote add, push) and cmd_rm cleanup
 
 ## Progress
 
@@ -80,4 +82,4 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4
 | 1. CLI Skeleton and VM Lifecycle | 0/2 | Planning complete | - |
 | 2. Security Boundary | 0/2 | Planning complete | - |
 | 3. Agent Provisioning | 0/1 | Planning complete | - |
-| 4. Code Bridge | 0/0 | Not started | - |
+| 4. Code Bridge | 0/1 | Planning complete | - |
