@@ -134,6 +134,9 @@ mise trust ~/mise.toml
 echo "eval \"\$(mise activate bash)\"" >> ~/.bashrc
 echo "[ -f ~/.bashrc ] && . ~/.bashrc" >> ~/.bash_profile
 mkdir -p ~/repo
+cd ~/repo
+git init
+git config receive.denyCurrentBranch updateInstead
 '
 
 # Allow SSH as ai user (aq sets up root SSH, copy authorized_keys)
@@ -165,6 +168,38 @@ PROVISION
                 warn "Failed to install $agent. VM is usable without it."
             fi
         done
+    fi
+
+    # --- Code Bridge (CODE-01) ---
+    local ssh_port
+    ssh_port=$(get_ssh_port "$vm_name") || die "SSH port not available."
+
+    # Remove stale remote if exists (idempotent)
+    git remote remove rl 2>/dev/null || true
+
+    # Add guest as git remote (D-01, D-02)
+    git remote add rl "ssh://ai@localhost:${ssh_port}/home/ai/repo"
+
+    # Set SSH options at repo level so 'git fetch rl' just works (D-05)
+    git config --local core.sshCommand "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+
+    # Push current branch to guest (D-04)
+    if git rev-parse HEAD >/dev/null 2>&1; then
+        local current_branch
+        current_branch=$(git symbolic-ref --short HEAD 2>/dev/null) || true
+        if [ -n "$current_branch" ]; then
+            spinner_start "Pushing code to VM"
+            if git push rl "$current_branch" 2>/dev/null; then
+                spinner_stop "Code pushed"
+            else
+                spinner_stop "Push failed"
+                warn "Could not push code. Push manually: git push rl $current_branch"
+            fi
+        else
+            warn "Detached HEAD. Push code manually when ready."
+        fi
+    else
+        info "No commits yet. Push code after your first commit: git push rl <branch>"
     fi
 
     # Final output
