@@ -1,0 +1,5 @@
+description = "OpenAI Codex AI agent"
+deps = ["auth-proxy"]
+host_deps = []
+triggers = []
+commands = ["codex"]
