@@ -1,0 +1,5 @@
+description = "API key proxy (Caddy reverse proxy for credential injection)"
+deps = []
+host_deps = ["caddy"]
+triggers = []
+commands = ["auth"]
