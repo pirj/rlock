@@ -65,7 +65,8 @@ cmd_new() {
     # Check for additional triggered plugins not yet in the resolved list
     if [[ ${#resolved[@]} -gt 0 ]]; then
         local -a extra_triggered
-        ACTIVATED_PLUGINS="${resolved[*]}" mapfile -t extra_triggered < <(detect_triggers "$(pwd)" "${available[@]}")
+        export ACTIVATED_PLUGINS="${resolved[*]}"
+        mapfile -t extra_triggered < <(detect_triggers "$(pwd)" "${available[@]}")
         local plugin
         for plugin in "${extra_triggered[@]}"; do
             [[ -n "$plugin" ]] || continue
