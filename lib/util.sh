@@ -27,15 +27,6 @@ check_dependency() {
     fi
 }
 
-check_all_deps() {
-    check_dependency "aq" "brew install pirj/tap/aq"
-    check_dependency "qemu-system-aarch64" "brew install qemu"
-    check_dependency "git" "brew install git"
-    check_dependency "ssh" "Install OpenSSH"
-    check_dependency "tmux" "brew install tmux"
-    check_dependency "caddy" "brew install caddy"
-}
-
 # --- .rl/ State Management ---
 
 get_vm_name() {
@@ -95,4 +86,58 @@ get_ssh_port() {
     else
         return 1
     fi
+}
+
+# --- VM State ---
+
+is_vm_running() {
+    local vm_name="$1"
+    local pid_file="$AQ_STATE_DIR/$vm_name/process.pid"
+    if [ -f "$pid_file" ] && kill -0 "$(cat "$pid_file" 2>/dev/null)" 2>/dev/null; then
+        return 0
+    fi
+    return 1
+}
+
+wait_for_ssh() {
+    local vm_name="$1"
+    local timeout="${2:-60}"
+    local elapsed=0
+
+    while [ ! -f "$AQ_STATE_DIR/$vm_name/ssh-port.conf" ] && [ "$elapsed" -lt "$timeout" ]; do
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+
+    if [ "$elapsed" -ge "$timeout" ]; then
+        return 1
+    fi
+
+    local port
+    port=$(get_ssh_port "$vm_name") || return 1
+
+    while [ "$elapsed" -lt "$timeout" ]; do
+        if ssh -o ConnectTimeout=2 \
+              -o StrictHostKeyChecking=no \
+              -o UserKnownHostsFile=/dev/null \
+              -p "$port" root@localhost true 2>/dev/null; then
+            return 0
+        fi
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+    return 1
+}
+
+# --- Plugin State ---
+
+save_active_plugins() {
+    ensure_rl_dir
+    printf '%s\n' "$@" > "$RL_DIR/plugins"
+}
+
+get_active_plugins() {
+    local plugins_file="$RL_DIR/plugins"
+    [[ -f "$plugins_file" ]] || return 0
+    cat "$plugins_file"
 }

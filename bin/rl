@@ -1,70 +1,235 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 LIB_DIR="$PROJECT_DIR/lib"
+export RL_LIB_DIR="$LIB_DIR"
 
-# Source shared modules (always needed)
-. "$LIB_DIR/ui.sh"
-. "$LIB_DIR/util.sh"
-
-# --- Help ---
+source "$LIB_DIR/ui.sh"
+source "$LIB_DIR/util.sh"
+source "$LIB_DIR/toml.sh"
+source "$LIB_DIR/plugin.sh"
 
 cmd_help() {
-    cat <<'EOF'
-usage: rl <command>
+    cat <<'USAGE'
+Usage: rl <command> [args...]
 
-commands:
-  new      Create a new isolated VM for the current repo
-  code     Connect to the VM's coding session
-  status   Show the current repo's airlock status
-  rm       Destroy the VM and clean up resources
-  auth     Configure API keys for AI agents
+Commands:
+  new [plugins...]   Create a new airlock VM
+  rm                 Destroy the airlock VM
+  status             Show airlock status
+  ssh                SSH into the VM
+  help               Show this help
 
-Run 'rl <command> --help' for command-specific help.
-EOF
+Plugins are activated during 'rl new'. Additional commands
+are provided by activated plugins.
+USAGE
 }
 
-# Check all dependencies
-check_all_deps
+cmd_new() {
+    local -a requested=("$@")
 
-# Parse subcommand
-cmd="${1:-help}"
-shift 2>/dev/null || true
+    # Check base host deps
+    check_dependency "aq" "Install from https://github.com/pirj/aq"
+    check_dependency "ssh" "Install OpenSSH"
 
-# Dispatch
-case "$cmd" in
-    new)
-        . "$LIB_DIR/creds.sh"
-        . "$LIB_DIR/proxy.sh"
-        . "$LIB_DIR/vm.sh"
-        . "$LIB_DIR/ssh.sh"
-        . "$LIB_DIR/agent.sh"
-        cmd_new "$@"
-        ;;
-    code)
-        . "$LIB_DIR/vm.sh"
-        . "$LIB_DIR/ssh.sh"
-        cmd_code "$@"
-        ;;
-    status)
-        . "$LIB_DIR/vm.sh"
-        cmd_status "$@"
-        ;;
-    rm)
-        . "$LIB_DIR/vm.sh"
-        cmd_rm "$@"
-        ;;
-    auth)
-        . "$LIB_DIR/creds.sh"
-        . "$LIB_DIR/proxy.sh"
-        cmd_auth "$@"
-        ;;
-    help|--help|-h)
-        cmd_help
-        ;;
+    # Discover available plugins
+    local -a available
+    mapfile -t available < <(discover_plugins)
+
+    # If no plugins requested, detect triggers and prompt
+    if [[ ${#requested[@]} -eq 0 || ( ${#requested[@]} -eq 1 && -z "${requested[0]:-}" ) ]]; then
+        requested=()
+        local -a triggered
+        mapfile -t triggered < <(detect_triggers "$(pwd)" "${available[@]}")
+        local plugin
+        for plugin in "${triggered[@]}"; do
+            [[ -n "$plugin" ]] || continue
+            local desc
+            desc=$(toml_get "$(plugin_dir "$plugin")/plugin.toml" "description")
+            local answer
+            read -rp "Include ${desc:-$plugin}? (Y/n) " answer
+            if [[ "${answer:-Y}" =~ ^[Yy]$ ]]; then
+                requested+=("$plugin")
+            fi
+        done
+    fi
+
+    # Resolve dependencies
+    local -a resolved=()
+    if [[ ${#requested[@]} -gt 0 ]]; then
+        mapfile -t resolved < <(resolve_deps "${requested[@]}")
+    fi
+
+    # Check for additional triggered plugins not yet in the resolved list
+    if [[ ${#resolved[@]} -gt 0 ]]; then
+        local -a extra_triggered
+        ACTIVATED_PLUGINS="${resolved[*]}" mapfile -t extra_triggered < <(detect_triggers "$(pwd)" "${available[@]}")
+        local plugin
+        for plugin in "${extra_triggered[@]}"; do
+            [[ -n "$plugin" ]] || continue
+            local desc
+            desc=$(toml_get "$(plugin_dir "$plugin")/plugin.toml" "description")
+            local answer
+            read -rp "Include ${desc:-$plugin}? (Y/n) " answer
+            if [[ "${answer:-Y}" =~ ^[Yy]$ ]]; then
+                mapfile -t resolved < <(resolve_deps "${resolved[@]}" "$plugin")
+            fi
+        done
+    fi
+
+    # Check host deps and command conflicts
+    if [[ ${#resolved[@]} -gt 0 ]]; then
+        check_host_deps "${resolved[@]}"
+        check_command_conflicts "${resolved[@]}"
+    fi
+
+    # Create VM
+    local vm_name
+    vm_name=$(get_vm_name)
+
+    if [[ -d "$AQ_STATE_DIR/$vm_name" ]]; then
+        die "Airlock '$vm_name' already exists. Run 'rl rm' first."
+    fi
+
+    spinner_start "Creating VM"
+    aq new "$vm_name"
+    aq start "$vm_name"
+    spinner_stop "VM created"
+
+    save_vm_name "$vm_name"
+
+    spinner_start "Waiting for SSH"
+    if ! wait_for_ssh "$vm_name" 60; then
+        die "SSH connection timed out"
+    fi
+    spinner_stop "SSH ready"
+
+    # Base provisioning: create ai user, install essentials
+    spinner_start "Provisioning base environment"
+    aq exec "$vm_name" sh <<'BASE_PROVISION'
+set -eu
+sed -i 's/^#\(.*community\)/\1/' /etc/apk/repositories
+apk update
+apk add bash curl sudo
+adduser -D ai
+echo "ai ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/ai
+mkdir -p /home/ai/.ssh
+cp /root/.ssh/authorized_keys /home/ai/.ssh/
+chown -R ai:ai /home/ai/.ssh
+chmod 700 /home/ai/.ssh
+chmod 600 /home/ai/.ssh/authorized_keys
+BASE_PROVISION
+    spinner_stop "Base environment ready"
+
+    # Run plugin provision hooks
+    local plugin
+    for plugin in "${resolved[@]}"; do
+        spinner_start "Provisioning: $plugin"
+        if ! run_hook "$plugin" "provision" "$vm_name"; then
+            spinner_stop "FAILED: $plugin"
+            die "Plugin '$plugin' provisioning failed. VM left for debugging (rl ssh to inspect, rl rm to clean up)."
+        fi
+        spinner_stop "Provisioned: $plugin"
+    done
+
+    # Run plugin start hooks
+    for plugin in "${resolved[@]}"; do
+        run_hook "$plugin" "start" "$vm_name" || true
+    done
+
+    # Save activated plugins
+    if [[ ${#resolved[@]} -gt 0 ]]; then
+        save_active_plugins "${resolved[@]}"
+    fi
+
+    success "Airlock ready"
+    if [[ ${#resolved[@]} -gt 0 ]]; then
+        info "Active plugins: ${resolved[*]}"
+    fi
+}
+
+cmd_rm() {
+    local vm_name
+    vm_name=$(resolve_vm_name) || die "No airlock found in this directory"
+
+    # Run rm hooks in reverse order
+    local -a plugins
+    mapfile -t plugins < <(get_active_plugins)
+    local i
+    for ((i=${#plugins[@]}-1; i>=0; i--)); do
+        local plugin="${plugins[$i]}"
+        [[ -n "$plugin" ]] || continue
+        run_hook "$plugin" "rm" "$vm_name" || warn "Plugin '$plugin' cleanup failed"
+    done
+
+    # Destroy VM
+    spinner_start "Destroying VM"
+    aq rm "$vm_name" || warn "aq rm failed for '$vm_name'"
+    spinner_stop "VM destroyed"
+
+    rm -rf "$RL_DIR"
+    success "Airlock removed"
+}
+
+cmd_status() {
+    local vm_name
+    vm_name=$(resolve_vm_name) || die "No airlock found in this directory"
+
+    local state
+    if is_vm_running "$vm_name"; then
+        local pid port
+        pid=$(<"$AQ_STATE_DIR/$vm_name/process.pid")
+        port=$(get_ssh_port "$vm_name")
+        state="${GREEN}running${RESET} (PID $pid, SSH port $port)"
+    else
+        state="${YELLOW}stopped${RESET}"
+    fi
+
+    echo "Airlock: $vm_name"
+    echo "VM:      $state"
+
+    local -a plugins
+    mapfile -t plugins < <(get_active_plugins)
+    if [[ ${#plugins[@]} -gt 0 && -n "${plugins[0]:-}" ]]; then
+        echo "Plugins: ${plugins[*]}"
+    fi
+}
+
+cmd_ssh() {
+    local vm_name
+    vm_name=$(resolve_vm_name) || die "No airlock found in this directory"
+
+    if ! is_vm_running "$vm_name"; then
+        info "Starting stopped VM..."
+        aq start "$vm_name"
+        if ! wait_for_ssh "$vm_name" 60; then
+            die "SSH connection timed out"
+        fi
+    fi
+
+    local port
+    port=$(get_ssh_port "$vm_name")
+    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+        -p "$port" ai@localhost
+}
+
+# Main dispatch
+case "${1:-help}" in
+    new)    shift; cmd_new "$@" ;;
+    rm)     cmd_rm ;;
+    status) cmd_status ;;
+    ssh)    cmd_ssh ;;
+    help|--help|-h) cmd_help ;;
     *)
-        die "Unknown command '$cmd'. Run 'rl help' for usage."
+        # Try plugin command dispatch
+        _plugins=()
+        mapfile -t _plugins < <(get_active_plugins)
+        if [[ ${#_plugins[@]} -gt 0 && -n "${_plugins[0]:-}" ]]; then
+            ACTIVE_PLUGINS="${_plugins[*]}" dispatch_command "$@"
+        else
+            die "Unknown command: $1. Run 'rl help' for usage."
+        fi
         ;;
 esac
