@@ -126,3 +126,84 @@ resolve_deps() {
 
     return $rc
 }
+
+# Detect plugins whose triggers match files in the project directory.
+# Usage: detect_triggers project_dir plugin_name1 plugin_name2 ...
+# Skips plugins listed in ACTIVATED_PLUGINS env var (space-separated).
+# Prints matched plugin names (one per line).
+detect_triggers() {
+    local project_dir="$1"
+    shift
+    local -a available=("$@")
+
+    local plugin
+    for plugin in "${available[@]}"; do
+        # Skip if already activated
+        local skip=0
+        local activated
+        for activated in ${ACTIVATED_PLUGINS:-}; do
+            [[ "$activated" == "$plugin" ]] && skip=1 && break
+        done
+        [[ $skip -eq 1 ]] && continue
+
+        local pdir
+        pdir=$(plugin_dir "$plugin") || continue
+        local trigger
+        while IFS= read -r trigger; do
+            [[ -n "$trigger" ]] || continue
+            if [[ -e "$project_dir/$trigger" ]]; then
+                echo "$plugin"
+                break
+            fi
+        done < <(toml_get_array "$pdir/plugin.toml" "triggers")
+    done
+}
+
+# Check that all host dependencies for given plugins are available.
+# Usage: check_host_deps plugin1 plugin2 ...
+# Exits non-zero with message if any binary is missing.
+check_host_deps() {
+    local plugin
+    for plugin in "$@"; do
+        local pdir
+        pdir=$(plugin_dir "$plugin") || continue
+        local dep
+        while IFS= read -r dep; do
+            [[ -n "$dep" ]] || continue
+            if ! command -v "$dep" > /dev/null 2>&1; then
+                echo "Plugin '$plugin' requires '$dep' on the host" >&2
+                return 1
+            fi
+        done < <(toml_get_array "$pdir/plugin.toml" "host_deps")
+    done
+}
+
+# Check that no two activated plugins claim the same command.
+# Usage: check_command_conflicts plugin1 plugin2 ...
+# Exits non-zero with message if a conflict is found.
+# Uses a flat "cmd:owner cmd:owner ..." string to track seen commands
+# (bash 3.2 compatible — no associative arrays).
+check_command_conflicts() {
+    local seen_commands=""
+    local plugin
+    for plugin in "$@"; do
+        local pdir
+        pdir=$(plugin_dir "$plugin") || continue
+        local cmd
+        while IFS= read -r cmd; do
+            [[ -n "$cmd" ]] || continue
+            # Check if cmd already recorded: look for "cmd:" prefix in seen_commands
+            local owner entry
+            for entry in $seen_commands; do
+                case "$entry" in
+                    "$cmd":*)
+                        owner="${entry#*:}"
+                        echo "Command '$cmd' claimed by both $owner and $plugin" >&2
+                        return 1
+                        ;;
+                esac
+            done
+            seen_commands="$seen_commands $cmd:$plugin"
+        done < <(toml_get_array "$pdir/plugin.toml" "commands")
+    done
+}
