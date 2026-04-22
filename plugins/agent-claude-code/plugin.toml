@@ -1,0 +1,5 @@
+description = "Claude Code AI agent"
+deps = ["auth-proxy"]
+host_deps = []
+triggers = [".claude"]
+commands = ["claude"]
