@@ -1,0 +1,5 @@
+description = "Git gateway between host and guest"
+deps = []
+host_deps = ["git"]
+triggers = [".git"]
+commands = []
