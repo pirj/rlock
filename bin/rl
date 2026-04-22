@@ -167,7 +167,7 @@ cmd_rm() {
 
     # Destroy VM
     spinner_start "Destroying VM"
-    aq rm "$vm_name" || warn "aq rm failed for '$vm_name'"
+    aq rm "$vm_name" >/dev/null 2>&1 || warn "aq rm failed for '$vm_name'"
     spinner_stop "VM destroyed"
 
     rm -rf "$RL_DIR"
