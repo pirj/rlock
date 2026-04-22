@@ -207,3 +207,47 @@ check_command_conflicts() {
         done < <(toml_get_array "$pdir/plugin.toml" "commands")
     done
 }
+
+# Run a hook on a plugin.
+# Usage: run_hook plugin_name hook_name [args...]
+# Runs plugin.sh as a subprocess with the hook name as first arg.
+# Returns 0 if plugin has no plugin.sh or hook is not defined.
+# Returns the hook's exit code otherwise.
+run_hook() {
+    local plugin="$1" hook="$2"
+    shift 2
+    local pdir
+    pdir=$(plugin_dir "$plugin") || return 0
+    local plugin_sh="$pdir/plugin.sh"
+    [[ -f "$plugin_sh" ]] || return 0
+    RL_LIB_DIR="${RL_LIB_DIR:-$LIB_DIR}" bash "$plugin_sh" "$hook" "$@"
+}
+
+# Dispatch a plugin command.
+# Usage: dispatch_command command_name [args...]
+# Reads ACTIVE_PLUGINS (space-separated) to know which plugins to search.
+# Finds the plugin that declares this command and runs its command script.
+dispatch_command() {
+    local cmd_name="$1"
+    shift
+
+    local plugin
+    for plugin in ${ACTIVE_PLUGINS:-}; do
+        local pdir
+        pdir=$(plugin_dir "$plugin") || continue
+        local cmd
+        while IFS= read -r cmd; do
+            [[ -n "$cmd" ]] || continue
+            if [[ "$cmd" == "$cmd_name" ]]; then
+                local cmd_script="$pdir/commands/${cmd_name}.sh"
+                if [[ -f "$cmd_script" ]]; then
+                    RL_LIB_DIR="${RL_LIB_DIR:-$LIB_DIR}" bash "$cmd_script" "$@"
+                    return $?
+                fi
+            fi
+        done < <(toml_get_array "$pdir/plugin.toml" "commands")
+    done
+
+    echo "Unknown command: $cmd_name" >&2
+    return 1
+}
