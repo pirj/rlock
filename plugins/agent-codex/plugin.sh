@@ -39,7 +39,8 @@ CONFIG
 
     mise trust ~/mise.toml
 
-    # Ensure mise activates in bash
+    # Activate mise in both login and interactive shells
+    grep -q "mise activate" ~/.profile 2>/dev/null || echo "eval \"\$(mise activate bash)\"" >> ~/.profile
     grep -q "mise activate" ~/.bashrc || echo "eval \"\$(mise activate bash)\"" >> ~/.bashrc
 '
 
