@@ -110,20 +110,20 @@ cmd_new() {
     fi
     spinner_stop "SSH ready"
 
-    # Base provisioning: create ai user, install essentials
+    # Base provisioning: create rlock user, install essentials
     spinner_start "Provisioning base environment"
     aq exec "$vm_name" sh <<'BASE_PROVISION'
 set -eu
 sed -i 's/^#\(.*community\)/\1/' /etc/apk/repositories
 apk update
 apk add bash curl sudo
-adduser -D ai
-echo "ai ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/ai
-mkdir -p /home/ai/.ssh
-cp /root/.ssh/authorized_keys /home/ai/.ssh/
-chown -R ai:ai /home/ai/.ssh
-chmod 700 /home/ai/.ssh
-chmod 600 /home/ai/.ssh/authorized_keys
+adduser -D rlock
+echo "rlock ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/rlock
+mkdir -p /home/rlock/.ssh
+cp /root/.ssh/authorized_keys /home/rlock/.ssh/
+chown -R rlock:rlock /home/rlock/.ssh
+chmod 700 /home/rlock/.ssh
+chmod 600 /home/rlock/.ssh/authorized_keys
 BASE_PROVISION
     spinner_stop "Base environment ready"
 
@@ -216,7 +216,7 @@ cmd_ssh() {
     local port
     port=$(get_ssh_port "$vm_name")
     ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-        -p "$port" ai@localhost
+        -p "$port" rlock@localhost
 }
 
 # Main dispatch

@@ -8,7 +8,7 @@ provision() {
     aq exec "$vm" sh <<'PROVISION'
 set -eu
 apk add git
-su -l ai -c '
+su -l rlock -c '
     mkdir -p ~/repo
     cd ~/repo
     git init
@@ -21,7 +21,7 @@ start() {
     local vm="$1"
     local port
     port=$(get_ssh_port "$vm")
-    local remote_url="ssh://ai@localhost:$port/home/ai/repo"
+    local remote_url="ssh://rlock@localhost:$port/home/rlock/repo"
     local ssh_cmd="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes -p $port"
 
     echo ""

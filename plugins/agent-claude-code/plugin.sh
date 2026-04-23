@@ -15,8 +15,8 @@ npm install -g @anthropic-ai/claude-code
 # Install mise for env var management
 apk add mise
 
-# Configure mise with proxy URLs for ai user
-su -l ai -c '
+# Configure mise with proxy URLs for rlock user
+su -l rlock -c '
     mkdir -p ~/.claude
 
     cat > ~/mise.toml <<MISE
@@ -41,7 +41,7 @@ SETTINGS
 '
 
 # Verify installation
-su -l ai -c "claude --version" && echo "AGENT_OK" || echo "AGENT_FAIL"
+su -l rlock -c "claude --version" && echo "AGENT_OK" || echo "AGENT_FAIL"
 PROVISION
 }
 

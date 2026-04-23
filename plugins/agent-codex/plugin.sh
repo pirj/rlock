@@ -15,8 +15,8 @@ npm install -g @openai/codex
 # Install mise for env var management (if not already present)
 apk add mise 2>/dev/null || true
 
-# Configure mise with proxy URLs for ai user
-su -l ai -c '
+# Configure mise with proxy URLs for rlock user
+su -l rlock -c '
     mkdir -p ~/.codex
 
     # Add OpenAI env vars to mise.toml (append if exists)
@@ -42,7 +42,7 @@ CONFIG
 '
 
 # Verify installation
-su -l ai -c "codex --version" && echo "AGENT_OK" || echo "AGENT_FAIL"
+su -l rlock -c "codex --version" && echo "AGENT_OK" || echo "AGENT_FAIL"
 PROVISION
 }
 
