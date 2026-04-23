@@ -251,11 +251,14 @@ case "${1:-help}" in
     ssh)    cmd_ssh ;;
     help|--help|-h) cmd_help ;;
     *)
-        # Try plugin command dispatch
-        _plugins=()
-        mapfile -t _plugins < <(get_active_plugins)
-        if [[ ${#_plugins[@]} -gt 0 && -n "${_plugins[0]:-}" ]]; then
-            ACTIVE_PLUGINS="${_plugins[*]}" dispatch_command "$@"
+        # Try plugin command dispatch.
+        # Read plugins without process substitution to preserve stdin (terminal).
+        _active_plugins=""
+        if [[ -f "$RL_DIR/plugins" ]]; then
+            _active_plugins=$(tr '\n' ' ' < "$RL_DIR/plugins")
+        fi
+        if [[ -n "$_active_plugins" ]]; then
+            ACTIVE_PLUGINS="$_active_plugins" dispatch_command "$@"
         else
             die "Unknown command: $1. Run 'rl help' for usage."
         fi
