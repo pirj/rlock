@@ -117,7 +117,7 @@ set -eu
 sed -i 's/^#\(.*community\)/\1/' /etc/apk/repositories
 apk update
 apk add bash curl sudo openssh-server-pam
-adduser -D rlock
+adduser -D -s /bin/bash rlock
 echo "rlock ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/rlock
 mkdir -p /home/rlock/.ssh
 cp /root/.ssh/authorized_keys /home/rlock/.ssh/
