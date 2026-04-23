@@ -116,9 +116,8 @@ cmd_new() {
 set -eu
 sed -i 's/^#\(.*community\)/\1/' /etc/apk/repositories
 apk update
-apk add bash curl sudo
+apk add bash curl sudo openssh-server-pam
 adduser -D rlock
-passwd -u rlock
 echo "rlock ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/rlock
 mkdir -p /home/rlock/.ssh
 cp /root/.ssh/authorized_keys /home/rlock/.ssh/
@@ -126,9 +125,17 @@ chown -R rlock:rlock /home/rlock/.ssh
 chmod 700 /home/rlock/.ssh
 chmod 600 /home/rlock/.ssh/authorized_keys
 
-# Allow rlock user to SSH in (aq's sshd may only allow root)
-sed -i 's/^AllowUsers.*/& rlock/' /etc/ssh/sshd_config 2>/dev/null || true
-grep -q "^AllowUsers" /etc/ssh/sshd_config 2>/dev/null || echo "AllowUsers root rlock" >> /etc/ssh/sshd_config
+# Harden sshd and allow locked users (no password) via PAM.
+# AllowTcpForwarding and X11Forwarding are already in sshd_config.
+cat > /etc/ssh/sshd_config.d/base.conf <<'SSHD'
+UsePAM yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+AllowAgentForwarding no
+PermitUserEnvironment no
+PrintMotd no
+PermitRootLogin prohibit-password
+SSHD
 rc-service sshd restart
 BASE_PROVISION
     spinner_stop "Base environment ready"
