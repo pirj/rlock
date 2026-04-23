@@ -45,9 +45,19 @@ warn() {
 SPINNER_CHARS=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
 SPINNER_PID=""
 
+_spinner_cleanup() {
+    if [ -n "$SPINNER_PID" ]; then
+        kill "$SPINNER_PID" 2>/dev/null
+        wait "$SPINNER_PID" 2>/dev/null || true
+        SPINNER_PID=""
+        printf '\r\033[2K' >&2
+    fi
+}
+
 spinner_start() {
     local msg="$1"
     if [ -t 2 ]; then
+        trap '_spinner_cleanup; trap - INT; kill -INT $$' INT
         (
             local i=0
             while true; do

@@ -22,7 +22,7 @@ start() {
     local port
     port=$(get_ssh_port "$vm")
     local remote_url="ssh://ai@localhost:$port/home/ai/repo"
-    local ssh_cmd="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p $port"
+    local ssh_cmd="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes -p $port"
 
     echo ""
     info "Git remote command:"
