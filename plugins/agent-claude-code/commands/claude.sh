@@ -14,5 +14,5 @@ if ! is_vm_running "$vm_name"; then
 fi
 
 port=$(get_ssh_port "$vm_name")
-exec ssh -tt -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+ssh -t -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
     -p "$port" rlock@localhost "cd ~/repo && tmux new-session -A -s rl"
