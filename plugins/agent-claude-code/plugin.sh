@@ -7,7 +7,7 @@ provision() {
     local vm="$1"
     aq exec "$vm" sh <<'PROVISION'
 set -eu
-apk add nodejs npm build-base python3
+apk add nodejs npm build-base python3 tmux
 
 # Install Claude Code globally
 npm install -g @anthropic-ai/claude-code
