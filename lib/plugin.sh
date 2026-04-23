@@ -231,22 +231,28 @@ dispatch_command() {
     local cmd_name="$1"
     shift
 
+    # Find the command script first, without process substitution
+    # (process substitution steals stdin, breaking terminal-dependent commands).
+    local cmd_script=""
     local plugin
     for plugin in ${ACTIVE_PLUGINS:-}; do
         local pdir
         pdir=$(plugin_dir "$plugin") || continue
+        local commands
+        commands=$(toml_get_array "$pdir/plugin.toml" "commands")
         local cmd
-        while IFS= read -r cmd; do
-            [[ -n "$cmd" ]] || continue
+        for cmd in $commands; do
             if [[ "$cmd" == "$cmd_name" ]]; then
-                local cmd_script="$pdir/commands/${cmd_name}.sh"
-                if [[ -f "$cmd_script" ]]; then
-                    export RL_LIB_DIR="${RL_LIB_DIR:-$LIB_DIR}"
-                    exec "$cmd_script" "$@"
-                fi
+                cmd_script="$pdir/commands/${cmd_name}.sh"
+                break 2
             fi
-        done < <(toml_get_array "$pdir/plugin.toml" "commands")
+        done
     done
+
+    if [[ -n "$cmd_script" && -f "$cmd_script" ]]; then
+        export RL_LIB_DIR="${RL_LIB_DIR:-$LIB_DIR}"
+        exec "$cmd_script" "$@"
+    fi
 
     echo "Unknown command: $cmd_name" >&2
     return 1
