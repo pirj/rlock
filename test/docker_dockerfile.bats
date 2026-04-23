@@ -85,3 +85,51 @@ setup() {
     assert_success
     assert_output ""
 }
+
+@test "parse_run translates apt-get install" {
+    run parse_run "RUN apt-get install -y build-essential libpq-dev curl"
+    assert_success
+    assert_output "apk add build-base libpq-dev curl"
+}
+
+@test "parse_run translates apt install" {
+    run parse_run "RUN apt install -y git"
+    assert_success
+    assert_output "apk add git"
+}
+
+@test "parse_run translates yum install" {
+    run parse_run "RUN yum install -y libssl-dev"
+    assert_success
+    assert_output "apk add openssl-dev"
+}
+
+@test "parse_run translates dnf install" {
+    run parse_run "RUN dnf install -y zlib1g-dev"
+    assert_success
+    assert_output "apk add zlib-dev"
+}
+
+@test "parse_run strips --no-install-recommends" {
+    run parse_run "RUN apt-get install -y --no-install-recommends curl wget"
+    assert_success
+    assert_output "apk add curl wget"
+}
+
+@test "parse_run passes through non-install commands" {
+    run parse_run "RUN echo hello world"
+    assert_success
+    assert_output "echo hello world"
+}
+
+@test "parse_run passes through pip install" {
+    run parse_run "RUN pip install flask gunicorn"
+    assert_success
+    assert_output "pip install flask gunicorn"
+}
+
+@test "parse_run strips apt-get update prefix" {
+    run parse_run "RUN apt-get update && apt-get install -y curl"
+    assert_success
+    assert_output "apk add curl"
+}

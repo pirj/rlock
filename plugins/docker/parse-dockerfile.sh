@@ -92,3 +92,43 @@ parse_from() {
 
     echo "mise use ${runtime}@${version}"
 }
+
+# Parse a RUN line. If it's a package install, translate to apk add.
+# Otherwise, pass through the command as-is.
+parse_run() {
+    local line="$1"
+
+    # Strip "RUN " prefix
+    local cmd="${line#RUN }"
+
+    # Strip "apt-get update && " prefix if present
+    cmd=$(echo "$cmd" | sed 's/apt-get update *&& *//g; s/apt update *&& *//g')
+
+    # Detect package install patterns
+    local pkg_install_pattern='(apt-get|apt|yum|dnf) install'
+    if [[ "$cmd" =~ $pkg_install_pattern ]]; then
+        # Extract everything after "install"
+        local args="${cmd#*install}"
+
+        # Strip flags and map package names
+        local packages=""
+        local word
+        for word in $args; do
+            case "$word" in
+                -*) continue ;;
+                *)
+                    local mapped
+                    mapped=$(pkg_map_lookup "$word")
+                    packages="$packages $mapped"
+                    ;;
+            esac
+        done
+
+        packages="${packages# }"
+        if [[ -n "$packages" ]]; then
+            echo "apk add $packages"
+        fi
+    else
+        echo "$cmd"
+    fi
+}
