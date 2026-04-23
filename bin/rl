@@ -125,15 +125,26 @@ chown -R rlock:rlock /home/rlock/.ssh
 chmod 700 /home/rlock/.ssh
 chmod 600 /home/rlock/.ssh/authorized_keys
 
-# Harden sshd and allow locked users (no password) via PAM.
-# AllowTcpForwarding and X11Forwarding are already in sshd_config.
+# sshd hardening. AllowTcpForwarding and X11Forwarding already set in sshd_config.
 cat > /etc/ssh/sshd_config.d/base.conf <<'SSHD'
+# Allow locked accounts (no password) to authenticate via pubkey.
+# The rlock user has no password by design — keys are the only auth method.
 UsePAM yes
+
+# Default is "yes". Disable — pubkey only, no password prompts.
 PasswordAuthentication no
+
+# Default is "yes". Disable — prevents challenge-response password fallback.
 KbdInteractiveAuthentication no
+
+# Default is "yes". Disable — agent in the VM must not reach host SSH keys.
 AllowAgentForwarding no
-PermitUserEnvironment no
+
+# Default is "yes". Disable — aq already shows its own motd.
 PrintMotd no
+
+# Default is "prohibit-password" (matches our intent). Be explicit:
+# root can SSH in for provisioning, but only via pubkey.
 PermitRootLogin prohibit-password
 SSHD
 rc-service sshd restart
