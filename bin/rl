@@ -39,8 +39,10 @@ cmd_new() {
     mapfile -t available < <(discover_plugins)
 
     # If no plugins requested, detect triggers and prompt
+    local _prompted=0
     if [[ ${#requested[@]} -eq 0 || ( ${#requested[@]} -eq 1 && -z "${requested[0]:-}" ) ]]; then
         requested=()
+        _prompted=1
         local -a triggered
         mapfile -t triggered < <(detect_triggers "$(pwd)" "${available[@]}")
         local plugin
@@ -63,7 +65,8 @@ cmd_new() {
     fi
 
     # Check for additional triggered plugins not yet in the resolved list
-    if [[ ${#resolved[@]} -gt 0 ]]; then
+    # (only when plugins were explicitly requested via CLI args)
+    if [[ ${#requested[@]} -gt 0 && ${#resolved[@]} -gt 0 && "$_prompted" != "1" ]]; then
         local -a extra_triggered
         export ACTIVATED_PLUGINS="${resolved[*]}"
         mapfile -t extra_triggered < <(detect_triggers "$(pwd)" "${available[@]}")
