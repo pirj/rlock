@@ -242,7 +242,7 @@ dispatch_command() {
                 local cmd_script="$pdir/commands/${cmd_name}.sh"
                 if [[ -f "$cmd_script" ]]; then
                     export RL_LIB_DIR="${RL_LIB_DIR:-$LIB_DIR}"
-                    exec bash "$cmd_script" "$@"
+                    exec "$cmd_script" "$@"
                 fi
             fi
         done < <(toml_get_array "$pdir/plugin.toml" "commands")
