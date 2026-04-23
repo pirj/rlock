@@ -77,7 +77,7 @@ spinner_stop() {
         kill "$SPINNER_PID" 2>/dev/null
         wait "$SPINNER_PID" 2>/dev/null || true
         SPINNER_PID=""
-        printf '\r  %s✓%s %s\n' "$GREEN" "$RESET" "$1" >&2
+        printf '\r\033[2K  %s✓%s %s\n' "$GREEN" "$RESET" "$1" >&2
     else
         printf '  %s\n' "$1" >&2
     fi
