@@ -15,4 +15,4 @@ fi
 
 port=$(get_ssh_port "$vm_name")
 ssh -t -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-    -p "$port" rlock@localhost "cd ~/repo && tmux new-session -A -s rl"
+    -p "$port" rlock@localhost "cd ~/repo && tmux new-session -A -s rl 'bash -l -c claude'"
