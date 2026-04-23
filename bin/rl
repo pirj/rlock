@@ -124,6 +124,11 @@ cp /root/.ssh/authorized_keys /home/rlock/.ssh/
 chown -R rlock:rlock /home/rlock/.ssh
 chmod 700 /home/rlock/.ssh
 chmod 600 /home/rlock/.ssh/authorized_keys
+
+# Allow rlock user to SSH in (aq's sshd may only allow root)
+sed -i 's/^AllowUsers.*/& rlock/' /etc/ssh/sshd_config 2>/dev/null || true
+grep -q "^AllowUsers" /etc/ssh/sshd_config 2>/dev/null || echo "AllowUsers root rlock" >> /etc/ssh/sshd_config
+rc-service sshd restart
 BASE_PROVISION
     spinner_stop "Base environment ready"
 
