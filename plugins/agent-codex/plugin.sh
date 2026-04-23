@@ -37,6 +37,8 @@ MISE
 openai_base_url = "http://10.0.2.2:9111/v1"
 CONFIG
 
+    mise trust ~/mise.toml
+
     # Ensure mise activates in bash
     grep -q "mise activate" ~/.bashrc || echo "eval \"\$(mise activate bash)\"" >> ~/.bashrc
 '

@@ -36,6 +36,8 @@ MISE
 }
 SETTINGS
 
+    mise trust ~/mise.toml
+
     # Ensure mise activates in bash
     echo "eval \"\$(mise activate bash)\"" >> ~/.bashrc
 '
