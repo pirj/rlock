@@ -73,37 +73,54 @@ $compose_commands"
         return 0
     fi
 
-    # Separate env exports (go to rlock's profile) from other commands (run as root)
+    # Separate commands by type:
+    # 1. apk add — install system packages first (needed for compiling runtimes)
+    # 2. mise use — install runtimes (may compile from source, needs build deps)
+    # 3. export — env vars for rlock's profile
+    # 4. everything else — run in order
+    local apk_commands=""
+    local mise_commands=""
     local env_exports=""
-    local pkg_commands=""
+    local other_commands=""
 
     while IFS= read -r cmd; do
         [[ -n "$cmd" ]] || continue
-        if [[ "$cmd" == export* ]]; then
-            if [[ -n "$env_exports" ]]; then
-                env_exports="$env_exports
-$cmd"
-            else
-                env_exports="$cmd"
-            fi
+        if [[ "$cmd" == "apk add"* ]]; then
+            apk_commands="${apk_commands:+$apk_commands
+}$cmd"
+        elif [[ "$cmd" == "mise use"* ]]; then
+            mise_commands="${mise_commands:+$mise_commands
+}$cmd"
+        elif [[ "$cmd" == export* ]]; then
+            env_exports="${env_exports:+$env_exports
+}$cmd"
         else
-            if [[ -n "$pkg_commands" ]]; then
-                pkg_commands="$pkg_commands
-$cmd"
-            else
-                pkg_commands="$cmd"
-            fi
+            other_commands="${other_commands:+$other_commands
+}$cmd"
         fi
     done <<< "$script"
 
-    # Execute package/service commands as root
-    if [[ -n "$pkg_commands" ]]; then
-        echo "$pkg_commands" | aq exec "$vm" sh -s
+    # 1. System packages (as root)
+    if [[ -n "$apk_commands" ]]; then
+        info "Installing system packages..."
+        echo "$apk_commands" | aq exec "$vm" sh -s
     fi
 
-    # Add env exports to rlock's profile
+    # 2. Runtimes via mise (as rlock — mise is user-scoped)
+    if [[ -n "$mise_commands" ]]; then
+        info "Installing runtimes via mise..."
+        echo "$mise_commands" | aq exec "$vm" su -l rlock -c 'sh -s'
+    fi
+
+    # 3. Env exports → rlock's profile
     if [[ -n "$env_exports" ]]; then
         echo "$env_exports" | aq exec "$vm" sh -c 'cat >> /home/rlock/.profile'
+    fi
+
+    # 4. Other commands (as root — may include service setup, bundle install, etc.)
+    if [[ -n "$other_commands" ]]; then
+        info "Running setup commands..."
+        echo "$other_commands" | aq exec "$vm" sh -s
     fi
 }
 
