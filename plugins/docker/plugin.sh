@@ -113,16 +113,11 @@ provision() {
     if [[ -n "$mise_commands" ]]; then
         info "Installing mise and build dependencies..."
         aq exec "$vm" apk add mise build-base openssl-dev readline-dev yaml-dev zlib-dev libffi-dev
-        # Set up mise activation for rlock (idempotent — may already exist from agent plugins)
+        # Set up mise activation for rlock (idempotent)
         aq exec "$vm" su -l rlock -c 'grep -q "mise activate" ~/.profile 2>/dev/null || echo "eval \"\$(mise activate bash)\"" >> ~/.profile'
         aq exec "$vm" su -l rlock -c 'mise trust ~/mise.toml 2>/dev/null; true'
         info "Installing runtimes via mise..."
-        # Run each mise command separately (not via pipe) so config changes persist
-        local mise_cmd
-        while IFS= read -r mise_cmd; do
-            [[ -n "$mise_cmd" ]] || continue
-            aq exec "$vm" su -l rlock -c "$mise_cmd"
-        done <<< "$mise_commands"
+        echo "$mise_commands" | aq exec "$vm" su -l rlock -c 'bash -l -s'
     fi
 
     # 3. Env exports → rlock's .profile
