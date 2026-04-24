@@ -151,11 +151,11 @@ parse_env() {
     echo "export ${key}=\"${value}\""
 }
 
-# Parse a WORKDIR line into a mkdir command.
+# Parse a WORKDIR line. In VM context, project lives at ~/repo — skip with warning.
 parse_workdir() {
     local line="$1"
     local dir="${line#WORKDIR }"
-    echo "mkdir -p $dir"
+    echo "Warning: WORKDIR $dir skipped (project lives at ~/repo in VM)" >&2
 }
 
 # Translate a full Dockerfile into a sequence of Alpine provisioning commands.

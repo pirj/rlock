@@ -146,10 +146,10 @@ setup() {
     assert_output 'export RAILS_ENV="production"'
 }
 
-@test "parse_workdir outputs mkdir" {
+@test "parse_workdir warns and skips" {
     run parse_workdir "WORKDIR /app"
     assert_success
-    assert_output "mkdir -p /app"
+    assert_output --partial "WORKDIR /app skipped"
 }
 
 @test "translate_dockerfile handles full Dockerfile" {
@@ -168,8 +168,7 @@ EOF
     assert_line --index 0 "mise use ruby@3.2"
     assert_line --index 1 "apk add build-base libpq-dev"
     assert_line --index 2 'export RAILS_ENV="production"'
-    assert_line --index 3 "mkdir -p /app"
-    assert_line --index 4 "bundle install"
+    assert_line --index 3 "bundle install"
 }
 
 @test "translate_dockerfile handles continuation lines" {
