@@ -1,0 +1,5 @@
+description = "Docker environment translator (Dockerfile + docker-compose.yml)"
+deps = []
+host_deps = ["yq"]
+triggers = ["Dockerfile", "docker-compose.yml", "docker-compose.yaml"]
+commands = []
