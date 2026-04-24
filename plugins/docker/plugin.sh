@@ -111,10 +111,12 @@ provision() {
     #    mise compiles runtimes from source — they need headers that
     #    Docker base images include but Alpine doesn't have by default.
     if [[ -n "$mise_commands" ]]; then
-        info "Installing mise build dependencies..."
-        aq exec "$vm" apk add build-base openssl-dev readline-dev yaml-dev zlib-dev libffi-dev
+        info "Installing mise and build dependencies..."
+        aq exec "$vm" apk add mise build-base openssl-dev readline-dev yaml-dev zlib-dev libffi-dev
+        # Trust mise config and run as rlock (mise is user-scoped)
+        aq exec "$vm" su -l rlock -c 'mise trust ~/mise.toml 2>/dev/null; true'
         info "Installing runtimes via mise..."
-        echo "$mise_commands" | aq exec "$vm" su -l rlock -c 'sh -s'
+        echo "$mise_commands" | aq exec "$vm" su -l rlock -c 'bash -l -s'
     fi
 
     # 3. Env exports → rlock's .profile
