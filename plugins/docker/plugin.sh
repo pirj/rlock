@@ -108,7 +108,11 @@ provision() {
     fi
 
     # 2. Runtimes via mise (as rlock)
+    #    mise compiles runtimes from source — they need headers that
+    #    Docker base images include but Alpine doesn't have by default.
     if [[ -n "$mise_commands" ]]; then
+        info "Installing mise build dependencies..."
+        aq exec "$vm" apk add build-base openssl-dev readline-dev yaml-dev zlib-dev libffi-dev
         info "Installing runtimes via mise..."
         echo "$mise_commands" | aq exec "$vm" su -l rlock -c 'sh -s'
     fi
