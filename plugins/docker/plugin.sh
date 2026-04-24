@@ -127,7 +127,7 @@ provision() {
     # 4. Dockerfile RUN commands as rlock (bundle install, etc.)
     if [[ -n "$user_commands" ]]; then
         info "Running Dockerfile commands..."
-        echo "$user_commands" | aq exec "$vm" su -l rlock -c 'sh -s'
+        echo "$user_commands" | aq exec "$vm" su -l rlock -c 'bash -l -s'
     fi
 
     # 5. Compose service setup as root (initdb, rc-service, etc.)
