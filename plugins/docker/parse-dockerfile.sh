@@ -132,3 +132,92 @@ parse_run() {
         echo "$cmd"
     fi
 }
+
+# Parse an ENV line into an export statement.
+# Handles both "ENV KEY=value" and "ENV KEY value" formats.
+parse_env() {
+    local line="$1"
+    local rest="${line#ENV }"
+
+    local key value
+    if [[ "$rest" == *=* ]]; then
+        key="${rest%%=*}"
+        value="${rest#*=}"
+    else
+        key="${rest%% *}"
+        value="${rest#* }"
+    fi
+
+    echo "export ${key}=\"${value}\""
+}
+
+# Parse a WORKDIR line into a mkdir command.
+parse_workdir() {
+    local line="$1"
+    local dir="${line#WORKDIR }"
+    echo "mkdir -p $dir"
+}
+
+# Translate a full Dockerfile into a sequence of Alpine provisioning commands.
+# Usage: translate_dockerfile /path/to/Dockerfile
+# Outputs one command per line to stdout. Warnings go to stderr.
+translate_dockerfile() {
+    local dockerfile="$1"
+    local continued=""
+
+    while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
+        # Strip leading/trailing whitespace
+        local line
+        line=$(echo "$raw_line" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+
+        # Skip empty lines and comments
+        [[ -z "$line" ]] && continue
+        [[ "$line" == \#* ]] && continue
+
+        # Handle continuation lines
+        if [[ "$line" == *\\ ]]; then
+            continued="$continued ${line%\\}"
+            continue
+        fi
+        if [[ -n "$continued" ]]; then
+            line="$continued $line"
+            continued=""
+        fi
+
+        # Strip leading whitespace again after joining
+        line="${line#"${line%%[![:space:]]*}"}"
+
+        # Parse directive
+        local directive
+        directive=$(echo "$line" | awk '{print toupper($1)}')
+
+        case "$directive" in
+            FROM)
+                local result
+                result=$(parse_from "$line")
+                [[ -n "$result" ]] && echo "$result"
+                ;;
+            RUN)
+                local result
+                result=$(parse_run "$line")
+                [[ -n "$result" ]] && echo "$result"
+                ;;
+            ENV)
+                parse_env "$line"
+                ;;
+            WORKDIR)
+                parse_workdir "$line"
+                ;;
+            COPY|ADD)
+                echo "Warning: $directive skipped (source code delivered via git)" >&2
+                ;;
+            EXPOSE)
+                local port="${line#EXPOSE }"
+                echo "Warning: EXPOSE $port noted — configure QEMU hostfwd manually if needed" >&2
+                ;;
+            HEALTHCHECK|STOPSIGNAL|SHELL|ONBUILD|USER|ENTRYPOINT|CMD)
+                echo "Warning: $directive not supported, skipped" >&2
+                ;;
+        esac
+    done < "$dockerfile"
+}

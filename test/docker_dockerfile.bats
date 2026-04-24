@@ -133,3 +133,69 @@ setup() {
     assert_success
     assert_output "apk add curl"
 }
+
+@test "parse_env outputs export" {
+    run parse_env "ENV RAILS_ENV=production"
+    assert_success
+    assert_output 'export RAILS_ENV="production"'
+}
+
+@test "parse_env handles space-separated format" {
+    run parse_env "ENV RAILS_ENV production"
+    assert_success
+    assert_output 'export RAILS_ENV="production"'
+}
+
+@test "parse_workdir outputs mkdir" {
+    run parse_workdir "WORKDIR /app"
+    assert_success
+    assert_output "mkdir -p /app"
+}
+
+@test "translate_dockerfile handles full Dockerfile" {
+    local dockerfile="$BATS_TEST_TMPDIR/Dockerfile"
+    cat > "$dockerfile" <<'EOF'
+FROM ruby:3.2
+RUN apt-get update && apt-get install -y build-essential libpq-dev
+ENV RAILS_ENV=production
+WORKDIR /app
+COPY . .
+EXPOSE 3000
+RUN bundle install
+EOF
+    run bash -c "source '$PLUGIN_DIR/parse-dockerfile.sh' && translate_dockerfile '$dockerfile' 2>/dev/null"
+    assert_success
+    assert_line --index 0 "mise use ruby@3.2"
+    assert_line --index 1 "apk add build-base libpq-dev"
+    assert_line --index 2 'export RAILS_ENV="production"'
+    assert_line --index 3 "mkdir -p /app"
+    assert_line --index 4 "bundle install"
+}
+
+@test "translate_dockerfile handles continuation lines" {
+    local dockerfile="$BATS_TEST_TMPDIR/Dockerfile"
+    cat > "$dockerfile" <<'EOF'
+FROM node:18
+RUN apt-get install -y \
+    curl \
+    wget
+EOF
+    run translate_dockerfile "$dockerfile"
+    assert_success
+    assert_line --index 0 "mise use node@18"
+    assert_line --index 1 "apk add curl wget"
+}
+
+@test "translate_dockerfile skips comments" {
+    local dockerfile="$BATS_TEST_TMPDIR/Dockerfile"
+    cat > "$dockerfile" <<'EOF'
+# This is a comment
+FROM ruby:3.2
+# Another comment
+RUN echo hello
+EOF
+    run translate_dockerfile "$dockerfile"
+    assert_success
+    assert_line --index 0 "mise use ruby@3.2"
+    assert_line --index 1 "echo hello"
+}
