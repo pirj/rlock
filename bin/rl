@@ -119,10 +119,6 @@ set -eu
 # Enlarge /tmp — default tmpfs is too small for compiling runtimes
 mount -o remount,size=1G /tmp
 
-# Set hostname to "rlock" regardless of VM name
-hostname rlock
-echo "rlock" > /etc/hostname
-
 sed -i 's/^#\(.*community\)/\1/' /etc/apk/repositories
 apk update
 apk add bash curl sudo openssh-server-pam
