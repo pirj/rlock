@@ -99,6 +99,8 @@ cmd_new() {
 
     spinner_start "Creating VM"
     aq new "$vm_name"
+    # Resize disk to 8G — default 2G is too small for compiling runtimes
+    qemu-img resize "$AQ_STATE_DIR/$vm_name/storage.qcow2" 8G >/dev/null 2>&1 || true
     aq start "$vm_name"
     spinner_stop "VM created"
 
