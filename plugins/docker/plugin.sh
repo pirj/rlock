@@ -113,22 +113,36 @@ provision() {
     if [[ -n "$mise_commands" ]]; then
         info "Installing mise and build dependencies..."
         aq exec "$vm" apk add mise build-base openssl-dev readline-dev yaml-dev zlib-dev libffi-dev
-        # Set up mise activation for rlock (idempotent)
-        aq exec "$vm" su -l rlock -c 'grep -q "mise activate" ~/.profile 2>/dev/null || echo "eval \"\$(mise activate bash)\"" >> ~/.profile'
-        aq exec "$vm" su -l rlock -c 'mise trust ~/mise.toml 2>/dev/null; true'
+        # Set up mise activation, trust config, install runtimes — all as rlock.
+        # Wrap in a heredoc to avoid SSH arg quoting issues.
         info "Installing runtimes via mise..."
-        echo "$mise_commands" | aq exec "$vm" su -l rlock -c 'bash -l -s'
+        aq exec "$vm" <<MISE_SETUP
+su -l rlock -c 'bash -l -s' <<'RLOCK'
+grep -q "mise activate" ~/.profile 2>/dev/null || echo 'eval "\$(mise activate bash)"' >> ~/.profile
+eval "\$(mise activate bash)"
+mise trust ~/mise.toml 2>/dev/null || true
+$mise_commands
+RLOCK
+MISE_SETUP
     fi
 
     # 3. Env exports → rlock's .profile
     if [[ -n "$env_exports" ]]; then
-        echo "$env_exports" | aq exec "$vm" sh -c 'cat >> /home/rlock/.profile'
+        aq exec "$vm" <<ENV_SETUP
+cat >> /home/rlock/.profile <<'EXPORTS'
+$env_exports
+EXPORTS
+ENV_SETUP
     fi
 
     # 4. Dockerfile RUN commands as rlock (bundle install, etc.)
     if [[ -n "$user_commands" ]]; then
         info "Running Dockerfile commands..."
-        echo "$user_commands" | aq exec "$vm" su -l rlock -c 'bash -l -s'
+        aq exec "$vm" <<USER_CMDS
+su -l rlock -c 'bash -l -s' <<'RLOCK'
+$user_commands
+RLOCK
+USER_CMDS
     fi
 
     # 5. Compose service setup as root (initdb, rc-service, etc.)
