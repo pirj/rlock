@@ -15,24 +15,20 @@ provision() {
     local project_dir
     project_dir=$(pwd)
 
-    local script=""
+    # Collect commands from Dockerfile and compose separately
+    local dockerfile_commands="" compose_commands_str=""
 
     # Step 1: Translate Dockerfile
     local dockerfile="$project_dir/Dockerfile"
     if [[ -f "$dockerfile" ]]; then
         info "Translating Dockerfile..."
-        local commands warnings
-        commands=$(translate_dockerfile "$dockerfile" 2>/dev/null) || true
+        local warnings
+        dockerfile_commands=$(translate_dockerfile "$dockerfile" 2>/dev/null) || true
         warnings=$(translate_dockerfile "$dockerfile" 2>&1 1>/dev/null) || true
-
         if [[ -n "$warnings" ]]; then
             while IFS= read -r w; do
                 [[ -n "$w" ]] && warn "$w"
             done <<< "$warnings"
-        fi
-
-        if [[ -n "$commands" ]]; then
-            script="$commands"
         fi
     fi
 
@@ -47,80 +43,91 @@ provision() {
 
     if [[ -n "$composefile" ]]; then
         info "Translating $(basename "$composefile")..."
-        local compose_commands compose_warnings
-        compose_commands=$(translate_compose "$composefile" 2>/dev/null) || true
-        compose_warnings=$(translate_compose "$composefile" 2>&1 1>/dev/null) || true
-
-        if [[ -n "$compose_warnings" ]]; then
+        local warnings
+        compose_commands_str=$(translate_compose "$composefile" 2>/dev/null) || true
+        warnings=$(translate_compose "$composefile" 2>&1 1>/dev/null) || true
+        if [[ -n "$warnings" ]]; then
             while IFS= read -r w; do
                 [[ -n "$w" ]] && warn "$w"
-            done <<< "$compose_warnings"
-        fi
-
-        if [[ -n "$compose_commands" ]]; then
-            if [[ -n "$script" ]]; then
-                script="$script
-$compose_commands"
-            else
-                script="$compose_commands"
-            fi
+            done <<< "$warnings"
         fi
     fi
 
-    # Step 3: Execute in guest
-    if [[ -z "$script" ]]; then
+    if [[ -z "$dockerfile_commands" && -z "$compose_commands_str" ]]; then
         info "No Docker provisioning needed"
         return 0
     fi
 
-    # Separate commands by type:
-    # 1. apk add — install system packages first (needed for compiling runtimes)
-    # 2. mise use — install runtimes (may compile from source, needs build deps)
-    # 3. export — env vars for rlock's profile
-    # 4. everything else — run in order
-    local apk_commands=""
-    local mise_commands=""
-    local env_exports=""
-    local other_commands=""
+    # Categorize Dockerfile commands:
+    # - apk add → run as root (system packages, needed before runtimes)
+    # - mise use → run as rlock (user-scoped runtime manager)
+    # - export → append to rlock's .profile
+    # - everything else → run as rlock (bundle install, mkdir, etc.)
+    local apk_commands="" mise_commands="" env_exports="" user_commands=""
 
-    while IFS= read -r cmd; do
-        [[ -n "$cmd" ]] || continue
-        if [[ "$cmd" == "apk add"* ]]; then
-            apk_commands="${apk_commands:+$apk_commands
+    if [[ -n "$dockerfile_commands" ]]; then
+        while IFS= read -r cmd; do
+            [[ -n "$cmd" ]] || continue
+            if [[ "$cmd" == "apk add"* ]]; then
+                apk_commands="${apk_commands:+$apk_commands
 }$cmd"
-        elif [[ "$cmd" == "mise use"* ]]; then
-            mise_commands="${mise_commands:+$mise_commands
+            elif [[ "$cmd" == "mise use"* ]]; then
+                mise_commands="${mise_commands:+$mise_commands
 }$cmd"
-        elif [[ "$cmd" == export* ]]; then
-            env_exports="${env_exports:+$env_exports
+            elif [[ "$cmd" == export* ]]; then
+                env_exports="${env_exports:+$env_exports
 }$cmd"
-        else
-            other_commands="${other_commands:+$other_commands
+            else
+                user_commands="${user_commands:+$user_commands
 }$cmd"
-        fi
-    done <<< "$script"
+            fi
+        done <<< "$dockerfile_commands"
+    fi
 
-    # 1. System packages (as root)
+    # Categorize compose commands: all run as root (service setup)
+    local service_commands=""
+    if [[ -n "$compose_commands_str" ]]; then
+        while IFS= read -r cmd; do
+            [[ -n "$cmd" ]] || continue
+            if [[ "$cmd" == "apk add"* ]]; then
+                apk_commands="${apk_commands:+$apk_commands
+}$cmd"
+            else
+                service_commands="${service_commands:+$service_commands
+}$cmd"
+            fi
+        done <<< "$compose_commands_str"
+    fi
+
+    # Execute in order:
+
+    # 1. System packages as root (from both Dockerfile and compose)
     if [[ -n "$apk_commands" ]]; then
         info "Installing system packages..."
         echo "$apk_commands" | aq exec "$vm" sh -s
     fi
 
-    # 2. Runtimes via mise (as rlock — mise is user-scoped)
+    # 2. Runtimes via mise (as rlock)
     if [[ -n "$mise_commands" ]]; then
         info "Installing runtimes via mise..."
         echo "$mise_commands" | aq exec "$vm" su -l rlock -c 'sh -s'
     fi
 
-    # 3. Env exports → rlock's profile
+    # 3. Env exports → rlock's .profile
     if [[ -n "$env_exports" ]]; then
         echo "$env_exports" | aq exec "$vm" sh -c 'cat >> /home/rlock/.profile'
     fi
 
-    # 4. Other commands (as root — may include service setup, bundle install, etc.)
-    if [[ -n "$other_commands" ]]; then
-        info "Running setup commands..."
-        echo "$other_commands" | aq exec "$vm" sh -s
+    # 4. Dockerfile RUN commands as rlock (bundle install, etc.)
+    if [[ -n "$user_commands" ]]; then
+        info "Running Dockerfile commands..."
+        echo "$user_commands" | aq exec "$vm" su -l rlock -c 'sh -s'
+    fi
+
+    # 5. Compose service setup as root (initdb, rc-service, etc.)
+    if [[ -n "$service_commands" ]]; then
+        info "Setting up services..."
+        echo "$service_commands" | aq exec "$vm" sh -s
     fi
 }
 
