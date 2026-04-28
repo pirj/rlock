@@ -53,3 +53,24 @@ _branch_vm_name() {
     [[ -n "$base_sha" ]] || return 1
     echo "$(_branch_sanitize "$branch")@${base_sha}"
 }
+
+# Find a snapshot.qcow2 belonging to a VM whose name ends with @<sha>.
+# Usage: _branch_find_ancestor_snapshot <short-sha>
+# Outputs the absolute path to snapshot.qcow2, or empty if none found.
+_branch_find_ancestor_snapshot() {
+    local sha="$1"
+    local aq="${AQ_STATE_DIR:-$HOME/.local/share/aq}"
+    [[ -d "$aq" ]] || return 0
+    local dir
+    for dir in "$aq"/*; do
+        [[ -d "$dir" ]] || continue
+        case "$(basename "$dir")" in
+            *@"$sha")
+                if [[ -f "$dir/snapshot.qcow2" ]]; then
+                    echo "$dir/snapshot.qcow2"
+                    return 0
+                fi
+                ;;
+        esac
+    done
+}

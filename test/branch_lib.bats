@@ -70,3 +70,27 @@ setup() {
     assert_success
     assert_output "feature_x@$main_sha"
 }
+
+@test "_branch_find_ancestor_snapshot returns nothing if no snapshots" {
+    AQ_STATE_DIR="$BATS_TEST_TMPDIR/aqstate" run _branch_find_ancestor_snapshot "abc1234"
+    assert_success
+    assert_output ""
+}
+
+@test "_branch_find_ancestor_snapshot finds matching snapshot" {
+    local aq="$BATS_TEST_TMPDIR/aqstate"
+    mkdir -p "$aq/main@abc1234"
+    touch "$aq/main@abc1234/snapshot.qcow2"
+    AQ_STATE_DIR="$aq" run _branch_find_ancestor_snapshot "abc1234"
+    assert_success
+    assert_output "$aq/main@abc1234/snapshot.qcow2"
+}
+
+@test "_branch_find_ancestor_snapshot ignores VMs without snapshot" {
+    local aq="$BATS_TEST_TMPDIR/aqstate"
+    mkdir -p "$aq/main@abc1234"
+    # No snapshot.qcow2
+    AQ_STATE_DIR="$aq" run _branch_find_ancestor_snapshot "abc1234"
+    assert_success
+    assert_output ""
+}
