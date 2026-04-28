@@ -41,17 +41,38 @@ get_saved_vm_name() {
     fi
 }
 
-# resolve_vm_name -- tries get_saved_vm_name first, then falls back to
-# get_vm_name if a matching VM exists in aq state. Handles orphaned VMs
-# from failed rl new attempts gracefully.
+# resolve_vm_name -- delegates to plugin resolve_vm hooks first, then
+# falls back to .rl/vm-name and finally to directory-derived name.
+# Plugins are queried in REVERSE dep order (most specific last).
 resolve_vm_name() {
+    # First: ask plugins via resolve_vm hook
+    if command -v get_active_plugins > /dev/null 2>&1 && \
+       command -v run_hook > /dev/null 2>&1; then
+        local plugin
+        local -a plugins
+        mapfile -t plugins < <(get_active_plugins)
+        # Iterate in reverse so the most recently added plugin wins
+        local i
+        for (( i=${#plugins[@]}-1; i>=0; i-- )); do
+            plugin="${plugins[$i]}"
+            [[ -n "$plugin" ]] || continue
+            local result
+            result=$(run_hook "$plugin" "resolve_vm" 2>/dev/null) || continue
+            if [[ -n "$result" ]]; then
+                printf '%s' "$result"
+                return 0
+            fi
+        done
+    fi
+
+    # Fallback: saved vm-name
     local saved
     if saved=$(get_saved_vm_name); then
         printf '%s' "$saved"
         return 0
     fi
 
-    # Fallback: check if a VM matching the directory name exists
+    # Last resort: directory-derived name if VM exists
     local derived
     derived=$(get_vm_name)
     if [ -d "$AQ_STATE_DIR/$derived" ]; then
