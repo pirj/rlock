@@ -141,3 +141,39 @@ get_active_plugins() {
     [[ -f "$plugins_file" ]] || return 0
     cat "$plugins_file"
 }
+
+# --- Centralized SSH ---
+
+# Run a command in the guest VM via SSH.
+# Usage: do_ssh vm_name [command...]
+# Without command — interactive shell. With command — exec it via -t.
+# Auto-starts stopped VM and waits for SSH.
+# Errors out cleanly if the VM does not exist.
+do_ssh() {
+    local vm_name="${1:-}"
+    if [[ -z "$vm_name" ]]; then
+        die "do_ssh: vm_name is required"
+    fi
+    shift
+
+    if [[ ! -d "$AQ_STATE_DIR/$vm_name" ]]; then
+        die "VM '$vm_name' not found. Hint: run 'rl branch' to create a VM for the current git branch."
+    fi
+
+    if ! is_vm_running "$vm_name"; then
+        info "Starting stopped VM..."
+        aq start "$vm_name"
+        wait_for_ssh "$vm_name" 60 || die "SSH connection timed out"
+    fi
+
+    local port
+    port=$(get_ssh_port "$vm_name")
+
+    if [[ $# -eq 0 ]]; then
+        ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -p "$port" rlock@localhost
+    else
+        ssh -t -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -p "$port" rlock@localhost "$@"
+    fi
+}
