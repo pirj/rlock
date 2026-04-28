@@ -17,6 +17,16 @@
 - **Exotic compose services** — only postgres, redis, mysql/mariadb, and memcached are mapped. Custom images require manual installation.
 - **RUN passthrough** — non-package-install RUN commands are executed as-is; some may fail on Alpine due to musl/glibc or missing tools.
 
+## Branch Plugin
+
+- **No automatic VM creation on branch switch** — `git checkout` doesn't create a VM. Run `rl branch` explicitly.
+- **No git hooks** — branch plugin doesn't install post-checkout/post-merge hooks. Could be added later.
+- **Manual changes lost in child branches** — child branches inherit the post-provisioning snapshot, not live VM state. Manual experiments don't propagate.
+- **Conservative pruning** — orphan snapshots may accumulate. Mid-chain `qemu-img rebase` flattening only happens for clearly safe cases.
+- **Detached HEAD not supported** — checkout a sha → no branch → no VM.
+- **Worktrees** — each git worktree has its own current branch, so `rl branch` works correctly per worktree. Worktrees that share commits resolve to the same VM (by design).
+- **`rl branch rm` does not prune chains in v1** — orphan snapshots persist until a future cleanup pass is implemented.
+
 ## Guest Environment
 
 - **musl vs glibc** — Alpine uses musl libc. Some projects with native extensions compiled for glibc may fail at runtime even when packages install successfully.
