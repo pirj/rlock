@@ -10,6 +10,7 @@
 
 ## Docker Plugin
 
+- **DEPRECATED** — the Dockerfile/compose → Alpine translator is being superseded by running Docker inside the VM and snapshotting the warm state. Kept temporarily for reference and existing airlocks; new development should target the docker-in-VM + snapshot approach.
 - **No incremental updates** — if Dockerfile or docker-compose.yml changes, `rl rm && rl new` is required.
 - **Multi-stage Dockerfiles** — not supported. `FROM ... AS ...` lines are skipped.
 - **COPY/ADD** — skipped. Source code is delivered via the git plugin.

@@ -11,6 +11,9 @@ source "$DOCKER_PLUGIN_DIR/parse-compose.sh"
 provision() {
     local vm="$1"
 
+    warn "The 'docker' plugin (Dockerfile/compose → Alpine translator) is DEPRECATED."
+    warn "It will be replaced by running Docker inside the VM and snapshotting the warm state."
+
     # Parse on the host, where Dockerfile/compose files live.
     local project_dir
     project_dir=$(pwd)
