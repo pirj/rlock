@@ -13,23 +13,30 @@ resolve_vm() {
     _branch_vm_name 2>/dev/null || true
 }
 
-# Set the guest hostname to the sanitized branch name.
-provision() {
-    local vm="$1"
-    local branch
-    branch=$(_branch_current) || return 0
-    [[ -n "$branch" ]] || return 0
-    local hostname
-    hostname=$(_branch_sanitize "$branch")
-    aq exec "$vm" sh -c "hostname '$hostname' && echo '$hostname' > /etc/hostname" || true
+# Snapshot layer identity = sanitized-branch@base-sha.
+snapshot_key() {
+    _branch_vm_name 2>/dev/null
 }
 
-# Prune orphan snapshots when removing this branch's VM.
-rm() {
+# Snapshot layer build = set hostname + push current branch into the guest repo.
+# qcow2 mechanics (rebase, save) are the framework's responsibility.
+snapshot_build() {
     local vm="$1"
-    # Conservative pruning: rebuild later when we have data on real chains.
-    # For now, just ensure the rm itself succeeds.
-    return 0
+    local branch hostname
+    branch=$(_branch_current) || return 0
+    [[ -n "$branch" ]] || return 0
+    hostname=$(_branch_sanitize "$branch")
+    aq exec "$vm" sh -c "hostname '$hostname' && echo '$hostname' > /etc/hostname" || true
+
+    # Push code via host-as-remote pattern.
+    if git remote get-url rl > /dev/null 2>&1; then
+        git remote remove rl
+    fi
+    local port
+    port=$(get_ssh_port "$vm")
+    git remote add rl "ssh://rlock@localhost:$port/home/rlock/repo"
+    git config core.sshCommand "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes -p $port"
+    git push rl "$branch" >/dev/null 2>&1 || warn "Push failed — try manually: git push rl $branch"
 }
 
 # Dispatch

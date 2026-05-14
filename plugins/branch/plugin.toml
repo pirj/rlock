@@ -1,5 +1,9 @@
 description = "Per-branch VM isolation with qcow2 snapshot inheritance"
+protocol_version = "1"
 deps = ["git"]
 host_deps = ["qemu-img", "git"]
 triggers = []
 commands = ["branch"]
+
+[snapshot]
+strategy = "cached"
