@@ -92,6 +92,24 @@ cmd_new() {
         check_command_conflicts "${resolved[@]}"
     fi
 
+    # Pre-flight: if any plugin's snapshot already exists, walk_chain will
+    # rebase the VM disk onto it — overwriting whatever base provisioning we
+    # would have done. Skip base provisioning in that case (the cached layer
+    # already contains it).
+    local has_cache_hit=0
+    local plugin key
+    if [[ ${#resolved[@]} -gt 0 ]]; then
+        for plugin in "${resolved[@]}"; do
+            plugin_has_snapshot "$plugin" || continue
+            key=$(run_hook "$plugin" "snapshot_key" 2>/dev/null) || continue
+            [[ -n "$key" ]] || continue
+            if snapshot_lookup "$plugin" "$key" >/dev/null 2>&1; then
+                has_cache_hit=1
+                break
+            fi
+        done
+    fi
+
     # Create VM
     local vm_name
     vm_name=$(get_vm_name)
@@ -115,7 +133,10 @@ cmd_new() {
     fi
     spinner_stop "SSH ready"
 
-    # Base provisioning: create rlock user, install essentials
+    # Base provisioning: create rlock user, install essentials.
+    # Skipped on warm path — walk_chain will rebase to a cached layer that
+    # already contains the equivalent state, and any work here would be lost.
+    if [[ $has_cache_hit -eq 0 ]]; then
     spinner_start "Provisioning base environment"
     aq exec "$vm_name" sh <<'BASE_PROVISION'
 set -eu
@@ -158,6 +179,9 @@ SSHD
 rc-service sshd restart
 BASE_PROVISION
     spinner_stop "Base environment ready"
+    else
+        info "Cache hit detected — skipping base provisioning"
+    fi
 
     # Walk the snapshot layer chain.
     # Plugins with [snapshot] participate; others are skipped here.
