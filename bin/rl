@@ -198,6 +198,28 @@ BASE_PROVISION
     if [[ ${#resolved[@]} -gt 0 ]]; then
         info "Active plugins: ${resolved[*]}"
     fi
+
+    # Surface the previous prune's result if any.
+    local prune_log="${RL_CACHE_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/aq/cache}/.last-prune.log"
+    if [[ -f "$prune_log" ]]; then
+        info "$(cat "$prune_log")"
+        rm -f "$prune_log"
+    fi
+
+    # Background prune: compute current live set from VM backing chains,
+    # then drop stale cache entries.
+    (
+        live_args=()
+        for d in "$AQ_STATE_DIR"/*/storage.qcow2; do
+            [[ -f "$d" ]] || continue
+            while IFS= read -r b; do
+                [[ -n "$b" ]] && live_args+=("--live" "$b")
+            done < <(qemu-img info --backing-chain "$d" 2>/dev/null \
+                | sed -n 's/^backing file: //p')
+        done
+        snapshot_prune "${live_args[@]}"
+    ) &
+    disown
 }
 
 cmd_rm() {

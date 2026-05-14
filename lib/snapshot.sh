@@ -137,3 +137,48 @@ snapshot_walk_chain() {
         fi
     done
 }
+
+# Remove cached snapshots that are stale.
+# Usage: snapshot_prune [--max-age-days=N] [--live path] [--live path ...]
+# A snapshot is removed when ALL conditions hold:
+#   * its file mtime is older than N days (default 30)
+#   * its path is not in the live set
+snapshot_prune() {
+    local max_age=30
+    local -a live=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --max-age-days=*) max_age="${1#--max-age-days=}"; shift ;;
+            --live) shift; live+=("$1"); shift ;;
+            *) shift ;;
+        esac
+    done
+
+    local removed=0 freed_bytes=0
+    local snap
+    while IFS= read -r snap; do
+        # Skip if in live set
+        local keep=0 l
+        for l in "${live[@]:-}"; do
+            [[ "$snap" == "$l" ]] && keep=1 && break
+        done
+        [[ $keep -eq 1 ]] && continue
+
+        # Skip if recent
+        if [[ -n "$(find "$snap" -mtime "-$max_age" -print 2>/dev/null)" ]]; then
+            continue
+        fi
+
+        local size
+        size=$(stat -f%z "$snap" 2>/dev/null || stat -c%s "$snap" 2>/dev/null || echo 0)
+        rm -f "$snap" "$(dirname "$snap")/meta.json"
+        rmdir "$(dirname "$snap")" 2>/dev/null || true
+        removed=$((removed + 1))
+        freed_bytes=$((freed_bytes + size))
+    done < <(find "$RL_CACHE_DIR" -name snapshot.qcow2 -type f 2>/dev/null)
+
+    if [[ $removed -gt 0 ]]; then
+        local mb=$((freed_bytes / 1024 / 1024))
+        echo "Pruned $removed stale snapshots (${mb} MB)" > "${RL_CACHE_DIR}/.last-prune.log"
+    fi
+}

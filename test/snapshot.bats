@@ -161,3 +161,19 @@ SH
     grep -q "BUILT:p4" "$BATS_TEST_TMPDIR/built.log"
     [ ! -d "$RL_CACHE_DIR/p4" ]
 }
+
+@test "snapshot_prune removes entries older than threshold + not in live set" {
+    mkdir -p "$RL_CACHE_DIR/foo/k_old" "$RL_CACHE_DIR/foo/k_recent" "$RL_CACHE_DIR/foo/k_live"
+    qemu-img create -f qcow2 "$RL_CACHE_DIR/foo/k_old/snapshot.qcow2" 1M >/dev/null
+    qemu-img create -f qcow2 "$RL_CACHE_DIR/foo/k_recent/snapshot.qcow2" 1M >/dev/null
+    qemu-img create -f qcow2 "$RL_CACHE_DIR/foo/k_live/snapshot.qcow2" 1M >/dev/null
+
+    # Backdate the "old" entry by 60 days
+    touch -t 202401010000 "$RL_CACHE_DIR/foo/k_old/snapshot.qcow2"
+
+    # Live set excludes k_live from pruning
+    snapshot_prune --max-age-days=30 --live "$RL_CACHE_DIR/foo/k_live/snapshot.qcow2"
+    [ ! -f "$RL_CACHE_DIR/foo/k_old/snapshot.qcow2" ]
+    [ -f "$RL_CACHE_DIR/foo/k_recent/snapshot.qcow2" ]
+    [ -f "$RL_CACHE_DIR/foo/k_live/snapshot.qcow2" ]
+}
