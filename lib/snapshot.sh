@@ -101,6 +101,9 @@ snapshot_walk_chain() {
     local vm="$1"; shift
     local parent_plugin="" parent_key="" parent_path=""
 
+    # Each iteration may rebase the VM disk; the VM must be stopped first.
+    snapshot_walk_vm_stop "$vm"
+
     local plugin strategy key cache_path latest disk
     for plugin in "$@"; do
         plugin_has_snapshot "$plugin" || continue
