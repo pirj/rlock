@@ -64,3 +64,61 @@ setup() {
     [ -f "$out" ]
     qemu-img info "$out" | grep -q "backing file: $backing"
 }
+
+# --- snapshot_walk_chain ---
+
+_setup_fake_plugin() {
+    # Args: name strategy key
+    local name="$1" strategy="$2" key="$3"
+    export PLUGIN_CORE_DIR="$BATS_TEST_TMPDIR/core"
+    export PLUGIN_USER_DIR="$BATS_TEST_TMPDIR/user"
+    mkdir -p "$PLUGIN_CORE_DIR/$name"
+    cat > "$PLUGIN_CORE_DIR/$name/plugin.toml" <<EOF
+description = "Fake $name"
+
+[snapshot]
+strategy = "$strategy"
+EOF
+    cat > "$PLUGIN_CORE_DIR/$name/plugin.sh" <<SH
+#!/usr/bin/env bash
+snapshot_key()  { echo "$key"; }
+snapshot_build() { echo "BUILT:$name" >> "$BATS_TEST_TMPDIR/built.log"; }
+if declare -f "\$1" > /dev/null 2>&1; then "\$1" "\${@:2}"; fi
+SH
+    chmod +x "$PLUGIN_CORE_DIR/$name/plugin.sh"
+}
+
+@test "snapshot_walk_chain cached: cache hit skips build" {
+    source "$LIB_DIR/plugin.sh"
+    _setup_fake_plugin "p1" "cached" "k1"
+    mkdir -p "$RL_CACHE_DIR/p1/k1"
+    qemu-img create -f qcow2 "$RL_CACHE_DIR/p1/k1/snapshot.qcow2" 1M >/dev/null
+
+    snapshot_walk_vm_boot()   { :; }
+    snapshot_walk_vm_stop()   { :; }
+    snapshot_walk_vm_disk()   { echo "$BATS_TEST_TMPDIR/fake.qcow2"; }
+    snapshot_walk_vm_rebase() { :; }
+
+    : > "$BATS_TEST_TMPDIR/built.log"
+    run snapshot_walk_chain "fakevm" "p1"
+    assert_success
+    [ ! -s "$BATS_TEST_TMPDIR/built.log" ]
+}
+
+@test "snapshot_walk_chain cached: miss triggers build + save" {
+    source "$LIB_DIR/plugin.sh"
+    _setup_fake_plugin "p2" "cached" "k2"
+
+    local fakedisk="$BATS_TEST_TMPDIR/disk.qcow2"
+    qemu-img create -f qcow2 "$fakedisk" 1M >/dev/null
+    snapshot_walk_vm_boot()   { :; }
+    snapshot_walk_vm_stop()   { :; }
+    snapshot_walk_vm_disk()   { echo "$fakedisk"; }
+    snapshot_walk_vm_rebase() { :; }
+
+    : > "$BATS_TEST_TMPDIR/built.log"
+    run snapshot_walk_chain "fakevm" "p2"
+    assert_success
+    grep -q "BUILT:p2" "$BATS_TEST_TMPDIR/built.log"
+    [ -f "$RL_CACHE_DIR/p2/k2/snapshot.qcow2" ]
+}

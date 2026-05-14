@@ -59,3 +59,81 @@ snapshot_rebase() {
     local out="$1" backing="$2"
     qemu-img create -f qcow2 -b "$backing" -F qcow2 "$out" >/dev/null
 }
+
+# --- VM seam ---
+# Thin wrappers around aq / qemu-img so tests can stub them.
+
+snapshot_walk_vm_disk() {
+    # Print the path of the current VM disk.
+    local vm="$1"
+    echo "$AQ_STATE_DIR/$vm/storage.qcow2"
+}
+
+snapshot_walk_vm_boot() {
+    local vm="$1"
+    aq start "$vm" >/dev/null
+    wait_for_ssh "$vm" 60 >/dev/null
+}
+
+snapshot_walk_vm_stop() {
+    local vm="$1"
+    aq stop "$vm" >/dev/null 2>&1 || true
+}
+
+snapshot_walk_vm_rebase() {
+    # Replace VM disk with a new qcow2 backed by the given file.
+    local vm="$1" backing="$2"
+    local disk
+    disk=$(snapshot_walk_vm_disk "$vm")
+    rm -f "$disk"
+    snapshot_rebase "$disk" "$backing"
+}
+
+# Walk the layer chain for an ordered plugin list.
+# Usage: snapshot_walk_chain vm plugin1 [plugin2 ...]
+# For each plugin with [snapshot]:
+#   * cached: lookup by current key; on miss, boot on parent, run snapshot_build, save.
+#   * incremental: lookup by current key; on miss, boot on latest-of-plugin (if any),
+#                  else parent, run snapshot_build, save under current key.
+#   * ephemeral: never cached. Boot on parent, run snapshot_build, do not save.
+# Plugins without [snapshot] are skipped here (provision is run elsewhere).
+snapshot_walk_chain() {
+    local vm="$1"; shift
+    local parent_plugin="" parent_key="" parent_path=""
+
+    local plugin strategy key cache_path latest disk
+    for plugin in "$@"; do
+        plugin_has_snapshot "$plugin" || continue
+        strategy=$(plugin_snapshot_strategy "$plugin")
+        key=$(run_hook "$plugin" "snapshot_key")
+
+        # Cache hit (cached + incremental only)
+        if [[ "$strategy" != "ephemeral" ]] && cache_path=$(snapshot_lookup "$plugin" "$key"); then
+            snapshot_walk_vm_rebase "$vm" "$cache_path"
+            parent_plugin="$plugin"; parent_key="$key"; parent_path="$cache_path"
+            continue
+        fi
+
+        # Miss: pick the right backing
+        if [[ "$strategy" == "incremental" ]]; then
+            if latest=$(snapshot_latest "$plugin" 2>/dev/null); then
+                snapshot_walk_vm_rebase "$vm" "$latest"
+            elif [[ -n "$parent_path" ]]; then
+                snapshot_walk_vm_rebase "$vm" "$parent_path"
+            fi
+        fi
+        # For cached: VM is already on parent's qcow2 (or initial base).
+        # For ephemeral: same — run on whatever the VM disk currently is.
+
+        snapshot_walk_vm_boot "$vm"
+        run_hook "$plugin" "snapshot_build" "$vm"
+        snapshot_walk_vm_stop "$vm"
+
+        if [[ "$strategy" != "ephemeral" ]]; then
+            disk=$(snapshot_walk_vm_disk "$vm")
+            snapshot_save "$disk" "$plugin" "$key" "$parent_plugin" "$parent_key"
+            parent_plugin="$plugin"; parent_key="$key"
+            parent_path=$(snapshot_cache_path "$plugin" "$key")
+        fi
+    done
+}
