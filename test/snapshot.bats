@@ -6,6 +6,7 @@ setup() {
 
     export RL_CACHE_DIR="$BATS_TEST_TMPDIR/cache"
     mkdir -p "$RL_CACHE_DIR"
+    source "$LIB_DIR/toml.sh"
     source "$LIB_DIR/snapshot.sh"
 }
 
@@ -121,4 +122,25 @@ SH
     assert_success
     grep -q "BUILT:p2" "$BATS_TEST_TMPDIR/built.log"
     [ -f "$RL_CACHE_DIR/p2/k2/snapshot.qcow2" ]
+}
+
+@test "snapshot_walk_chain incremental: miss boots from latest-of-plugin" {
+    source "$LIB_DIR/plugin.sh"
+    _setup_fake_plugin "p3" "incremental" "new-key"
+    # Existing snapshot for an older key
+    mkdir -p "$RL_CACHE_DIR/p3/old-key"
+    qemu-img create -f qcow2 "$RL_CACHE_DIR/p3/old-key/snapshot.qcow2" 1M >/dev/null
+
+    local fakedisk="$BATS_TEST_TMPDIR/disk.qcow2"
+    qemu-img create -f qcow2 "$fakedisk" 1M >/dev/null
+
+    local rebased_to=""
+    snapshot_walk_vm_rebase() { rebased_to="$2"; }
+    snapshot_walk_vm_boot()   { :; }
+    snapshot_walk_vm_stop()   { :; }
+    snapshot_walk_vm_disk()   { echo "$fakedisk"; }
+
+    snapshot_walk_chain "fakevm" "p3"
+    [ "$rebased_to" = "$RL_CACHE_DIR/p3/old-key/snapshot.qcow2" ]
+    [ -f "$RL_CACHE_DIR/p3/new-key/snapshot.qcow2" ]
 }
