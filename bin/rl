@@ -99,8 +99,8 @@ cmd_new() {
 
     spinner_start "Creating VM"
     aq new "$vm_name"
-    # Resize disk to 4G — default 2G is tight with runtimes and packages
-    qemu-img resize "$AQ_STATE_DIR/$vm_name/storage.qcow2" 4G >/dev/null 2>&1 || true
+    # Resize disk to 16G — accommodates docker-in-VM (images + volumes + DB)
+    qemu-img resize "$AQ_STATE_DIR/$vm_name/storage.qcow2" 16G >/dev/null 2>&1 || true
     aq start "$vm_name"
     spinner_stop "VM created"
 
