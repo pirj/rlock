@@ -5,11 +5,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 LIB_DIR="$PROJECT_DIR/lib"
 export RL_LIB_DIR="$LIB_DIR"
+export RL_BIN_DIR="$SCRIPT_DIR"
 
 source "$LIB_DIR/ui.sh"
 source "$LIB_DIR/util.sh"
 source "$LIB_DIR/toml.sh"
 source "$LIB_DIR/plugin.sh"
+source "$LIB_DIR/snapshot.sh"
 
 cmd_help() {
     cat <<'USAGE'
@@ -83,8 +85,9 @@ cmd_new() {
         done
     fi
 
-    # Check host deps and command conflicts
+    # Check host deps, command conflicts, and protocol versions
     if [[ ${#resolved[@]} -gt 0 ]]; then
+        check_protocol_versions "${resolved[@]}" || die "Plugin protocol incompatible."
         check_host_deps "${resolved[@]}"
         check_command_conflicts "${resolved[@]}"
     fi
@@ -156,9 +159,23 @@ rc-service sshd restart
 BASE_PROVISION
     spinner_stop "Base environment ready"
 
-    # Run plugin provision hooks
+    # Walk the snapshot layer chain.
+    # Plugins with [snapshot] participate; others are skipped here.
+    if [[ ${#resolved[@]} -gt 0 ]]; then
+        spinner_start "Walking snapshot layers"
+        snapshot_walk_chain "$vm_name" "${resolved[@]}"
+        spinner_stop "Layers ready"
+        # Boot the VM back up after the chain leaves it stopped.
+        aq start "$vm_name" >/dev/null
+        wait_for_ssh "$vm_name" 60 >/dev/null
+    fi
+
+    # Run provision hooks for plugins WITHOUT [snapshot] (legacy + side-effect-only)
     local plugin
     for plugin in "${resolved[@]}"; do
+        if plugin_has_snapshot "$plugin"; then
+            continue
+        fi
         spinner_start "Provisioning: $plugin"
         if ! run_hook "$plugin" "provision" "$vm_name"; then
             spinner_stop "FAILED: $plugin"
