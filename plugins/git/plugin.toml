@@ -1,5 +1,9 @@
 description = "Git gateway between host and guest"
+protocol_version = "1"
 deps = []
 host_deps = ["git"]
 triggers = [".git"]
 commands = []
+
+[snapshot]
+strategy = "cached"

@@ -3,9 +3,15 @@ set -euo pipefail
 source "${RL_LIB_DIR}/ui.sh"
 source "${RL_LIB_DIR}/util.sh"
 
-provision() {
+# Snapshot key = pinned identifier for this installation recipe.
+# Bump the suffix when the recipe changes.
+snapshot_key() {
+    printf 'git-recipe-v1' | sha256sum | cut -d' ' -f1
+}
+
+snapshot_build() {
     local vm="$1"
-    aq exec "$vm" sh <<'PROVISION'
+    aq exec "$vm" sh <<'BUILD'
 set -eu
 apk add git
 su -l rlock -c '
@@ -14,7 +20,7 @@ su -l rlock -c '
     git init
     git config receive.denyCurrentBranch updateInstead
 '
-PROVISION
+BUILD
 }
 
 start() {
