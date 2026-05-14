@@ -46,10 +46,12 @@ cd /home/rlock/repo
 docker compose build
 docker compose up -d
 
-# Wait up to 5 minutes for all services to be running and (if declared) healthy.
+# Wait up to 5 minutes for all services to be running. Services with a
+# declared healthcheck must report Health == "healthy"; services without
+# (empty/null Health) are considered ready as soon as State == "running".
 for i in $(seq 1 60); do
     pending=$(docker compose ps --format json | \
-        jq -s '[.[] | select(.State != "running" or (.Health != null and .Health != "healthy"))] | length')
+        jq -s '[.[] | select(.State != "running" or .Health == "starting" or .Health == "unhealthy")] | length')
     [ "$pending" = "0" ] && exit 0
     sleep 5
 done
