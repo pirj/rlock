@@ -21,6 +21,15 @@ and other backends https://github.com/microvm-nix/microvm.nix#hypervisors
 
 linux host
 
+aq integration to skip first-boot setup on warm path.
+ - Step 0 benchmark: warm rl new = 30s wall-clock. ~15s of that is aq's automatic
+   first-boot setup (sfdisk + resize2fs) which runs on every fresh `aq new` even
+   when we immediately rebase the disk to a cached qcow2.
+ - Need an aq mode equivalent to `aq new --backed-by=<qcow2> --no-first-boot` or
+   `aq new --from-snapshot=<tag>` that hands us an already-set-up disk.
+ - Belongs to Phase 2 (firecracker + aq snapshot-aware backend).
+ - Without this, sub-second warm boot from the original spec is unreachable.
+
 Caddy-based caching mirror for language registries (rubygems.org, registry.npmjs.org, PyPI, etc.).
  - Extend auth-proxy plugin (or sibling plugin) with cache-only reverse proxies.
  - Guest hits host mirror via env (BUNDLE_MIRROR__HTTPS___RUBYGEMS_ORG, npm_config_registry, etc.).
