@@ -177,9 +177,21 @@ resolve_deps() {
     return $rc
 }
 
+# Returns 0 if a plugin is marked deprecated in its manifest, 1 otherwise.
+plugin_is_deprecated() {
+    local plugin="$1"
+    local pdir
+    pdir=$(plugin_dir "$plugin") || return 1
+    local v
+    v=$(toml_get "$pdir/plugin.toml" "deprecated")
+    [[ "$v" == "true" ]]
+}
+
 # Detect plugins whose triggers match files in the project directory.
 # Usage: detect_triggers project_dir plugin_name1 plugin_name2 ...
 # Skips plugins listed in ACTIVATED_PLUGINS env var (space-separated).
+# Skips plugins marked `deprecated = true` — they may still be activated
+# explicitly by name, but won't be auto-suggested via trigger detection.
 # Prints matched plugin names (one per line).
 detect_triggers() {
     local project_dir="$1"
@@ -195,6 +207,9 @@ detect_triggers() {
             [[ "$activated" == "$plugin" ]] && skip=1 && break
         done
         [[ $skip -eq 1 ]] && continue
+
+        # Skip deprecated plugins.
+        plugin_is_deprecated "$plugin" && continue
 
         local pdir
         pdir=$(plugin_dir "$plugin") || continue

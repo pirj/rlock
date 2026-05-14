@@ -71,3 +71,26 @@ _make_plugin() {
     assert_failure
     assert_output --partial "requires protocol version 2"
 }
+
+@test "plugin_is_deprecated true when manifest declares deprecated = \"true\"" {
+    _make_plugin "p9" 'description = "P"' 'deprecated = "true"'
+    run plugin_is_deprecated "p9"
+    assert_success
+}
+
+@test "plugin_is_deprecated false when manifest lacks the field" {
+    _make_plugin "p10" 'description = "P"'
+    run plugin_is_deprecated "p10"
+    assert_failure
+}
+
+@test "detect_triggers skips deprecated plugins" {
+    mkdir -p "$BATS_TEST_TMPDIR/project"
+    touch "$BATS_TEST_TMPDIR/project/Dockerfile"
+    _make_plugin "old-docker" 'description = "Old"' 'deprecated = "true"' 'triggers = ["Dockerfile"]'
+    _make_plugin "new-docker" 'description = "New"' 'triggers = ["Dockerfile"]'
+    run detect_triggers "$BATS_TEST_TMPDIR/project" "old-docker" "new-docker"
+    assert_success
+    refute_output --partial "old-docker"
+    assert_output --partial "new-docker"
+}
