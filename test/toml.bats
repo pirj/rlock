@@ -62,3 +62,46 @@ EOF
     assert_success
     assert_output ".git"
 }
+
+@test "toml_get_in_section reads string key under section" {
+    cat > "$TEST_TOML" <<'EOF'
+description = "Top-level"
+
+[snapshot]
+strategy = "cached"
+order = "200"
+EOF
+    run toml_get_in_section "$TEST_TOML" "snapshot" "strategy"
+    assert_success
+    assert_output "cached"
+}
+
+@test "toml_get_in_section returns empty when key absent in section" {
+    cat > "$TEST_TOML" <<'EOF'
+[snapshot]
+strategy = "cached"
+EOF
+    run toml_get_in_section "$TEST_TOML" "snapshot" "missing"
+    assert_success
+    assert_output ""
+}
+
+@test "toml_get_in_section returns empty when section absent" {
+    echo 'description = "x"' > "$TEST_TOML"
+    run toml_get_in_section "$TEST_TOML" "snapshot" "strategy"
+    assert_success
+    assert_output ""
+}
+
+@test "toml_get_in_section does not bleed across sections" {
+    cat > "$TEST_TOML" <<'EOF'
+[other]
+strategy = "noop"
+
+[snapshot]
+strategy = "cached"
+EOF
+    run toml_get_in_section "$TEST_TOML" "snapshot" "strategy"
+    assert_success
+    assert_output "cached"
+}

@@ -18,3 +18,18 @@ toml_get_array() {
     line=$(grep "^${key} *= *\[" "$file" 2>/dev/null) || return 0
     echo "$line" | sed 's/^[^[]*\[//; s/\].*//' | tr ',' '\n' | sed -n 's/.*"\([^"]*\)".*/\1/p'
 }
+
+# Parse a string value from a [section] in a TOML file.
+# Usage: toml_get_in_section file section key
+# Prints the value (unquoted) or empty string if section/key not found.
+toml_get_in_section() {
+    local file="$1" section="$2" key="$3"
+    awk -v sec="[$section]" -v k="$key" '
+        $0 == sec { in_sec = 1; next }
+        /^\[/     { in_sec = 0; next }
+        in_sec && $0 ~ "^" k " *= *\"" {
+            sub("^" k " *= *\"", ""); sub("\".*", "")
+            print; exit
+        }
+    ' "$file"
+}
