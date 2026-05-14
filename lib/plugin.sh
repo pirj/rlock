@@ -5,6 +5,56 @@ set -euo pipefail
 PLUGIN_CORE_DIR="${PLUGIN_CORE_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../plugins" && pwd)}"
 PLUGIN_USER_DIR="${PLUGIN_USER_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/rl/plugins}"
 
+# Maximum plugin protocol version supported by this framework.
+PLUGIN_PROTOCOL_VERSION="1"
+
+# Print the protocol version declared by a plugin, or "1" if unset.
+plugin_protocol_version() {
+    local plugin="$1"
+    local pdir
+    pdir=$(plugin_dir "$plugin") || return 1
+    local v
+    v=$(toml_get "$pdir/plugin.toml" "protocol_version")
+    echo "${v:-1}"
+}
+
+# Verify every named plugin declares a protocol version <= framework's max.
+# Prints an error and returns 1 if any plugin requires a newer protocol.
+check_protocol_versions() {
+    local plugin v
+    for plugin in "$@"; do
+        v=$(plugin_protocol_version "$plugin")
+        if [[ "$v" -gt "$PLUGIN_PROTOCOL_VERSION" ]]; then
+            echo "Plugin '$plugin' requires protocol version $v, this framework supports up to $PLUGIN_PROTOCOL_VERSION" >&2
+            return 1
+        fi
+    done
+}
+
+# Returns 0 if plugin declares a [snapshot] section, 1 otherwise.
+plugin_has_snapshot() {
+    local plugin="$1"
+    local pdir
+    pdir=$(plugin_dir "$plugin") || return 1
+    grep -q '^\[snapshot\]' "$pdir/plugin.toml"
+}
+
+# Print the snapshot strategy declared by a plugin.
+# Defaults to "cached" when [snapshot] is present but strategy is unset.
+# Returns 1 with an error on unknown strategy.
+plugin_snapshot_strategy() {
+    local plugin="$1"
+    local pdir
+    pdir=$(plugin_dir "$plugin") || return 1
+    local s
+    s=$(toml_get_in_section "$pdir/plugin.toml" "snapshot" "strategy")
+    s="${s:-cached}"
+    case "$s" in
+        cached|incremental|ephemeral) echo "$s" ;;
+        *) echo "Plugin '$plugin' declares unknown snapshot strategy '$s'" >&2; return 1 ;;
+    esac
+}
+
 # Discover all available plugins.
 # Prints plugin names (one per line), sorted alphabetically.
 discover_plugins() {
