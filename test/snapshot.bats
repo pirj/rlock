@@ -144,3 +144,20 @@ SH
     [ "$rebased_to" = "$RL_CACHE_DIR/p3/old-key/snapshot.qcow2" ]
     [ -f "$RL_CACHE_DIR/p3/new-key/snapshot.qcow2" ]
 }
+
+@test "snapshot_walk_chain ephemeral: runs build but does not save" {
+    source "$LIB_DIR/plugin.sh"
+    _setup_fake_plugin "p4" "ephemeral" "k4"
+
+    local fakedisk="$BATS_TEST_TMPDIR/disk.qcow2"
+    qemu-img create -f qcow2 "$fakedisk" 1M >/dev/null
+    snapshot_walk_vm_boot()   { :; }
+    snapshot_walk_vm_stop()   { :; }
+    snapshot_walk_vm_disk()   { echo "$fakedisk"; }
+    snapshot_walk_vm_rebase() { :; }
+
+    : > "$BATS_TEST_TMPDIR/built.log"
+    snapshot_walk_chain "fakevm" "p4"
+    grep -q "BUILT:p4" "$BATS_TEST_TMPDIR/built.log"
+    [ ! -d "$RL_CACHE_DIR/p4" ]
+}
