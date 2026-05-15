@@ -8,16 +8,6 @@
 - **No plugin versioning** — no version field, no compatibility checks between plugins.
 - **No binary trigger detection** — triggers only match files/directories in the project root, not binaries on the host PATH.
 
-## Docker Plugin
-
-- **DEPRECATED** — the Dockerfile/compose → Alpine translator is being superseded by running Docker inside the VM and snapshotting the warm state. Kept temporarily for reference and existing airlocks; new development should target the docker-in-VM + snapshot approach.
-- **No incremental updates** — if Dockerfile or docker-compose.yml changes, `rl rm && rl new` is required.
-- **Multi-stage Dockerfiles** — not supported. `FROM ... AS ...` lines are skipped.
-- **COPY/ADD** — skipped. Source code is delivered via the git plugin.
-- **Version pinning** — `FROM ruby:3.2.1` installs via mise, which may resolve to the closest available patch version.
-- **Exotic compose services** — only postgres, redis, mysql/mariadb, and memcached are mapped. Custom images require manual installation.
-- **RUN passthrough** — non-package-install RUN commands are executed as-is; some may fail on Alpine due to musl/glibc or missing tools.
-
 ## Branch Plugin
 
 - **No automatic VM creation on branch switch** — `git checkout` doesn't create a VM. Run `rl branch` explicitly.

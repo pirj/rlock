@@ -1,17 +1,18 @@
 ## Project
 
-**AILockr**
+**rlock** — plugin-driven framework for ephemeral VM-isolated workspaces.
 
-A shell-based CLI tool (`rl`) that runs AI coding agents (Claude Code, Codex) inside QEMU virtual machines, completely isolated from the host filesystem. The VM communicates with the host only via git, and API keys never enter the VM — a Caddy reverse proxy on the host injects authorization headers. Built on top of pirj/aq for fast VM lifecycle management.
+A shell-based CLI tool (`rl`) on top of pirj/aq. Provides the plugin protocol, layered qcow2 snapshot orchestration, and two generic plugins (`git`, `branch`). Use-case-specific behavior (AI agents, CI runners, ...) lives in plugin-pack repos that depend on this one:
 
-**Core Value:** AI agents can run in full "danger mode" without risking the host machine — code stays isolated, secrets stay on the host, and the only bridge is git.
+- **ai.rlock** — AI coding-agent sandbox (Claude Code, Codex, auth-proxy). Caddy reverse proxy injects API keys host-side, no secrets in VM.
+- **\<bake\>** (TBD name) — CI / pre-baked-environment distribution (docker-engine, docker-compose, ruby-bundler, npm, ...). Sub-second warm boot via cached layers.
 
 ### Constraints
 
-- **VM engine**: QEMU via pirj/aq — no Docker, no containers
+- **VM engine**: QEMU via pirj/aq — no Docker, no containers (firecracker support planned in aq, Phase 2)
 - **Guest OS**: Alpine Linux (what aq uses)
-- **Shell script**: The tool itself is a shell script (POSIX sh or bash), not a compiled binary
-- **Dependencies**: Requires aq, Caddy, and git on the host machine
+- **Shell script**: The tool itself is a shell script (Bash), not a compiled binary
+- **Dependencies**: Requires aq, git, qemu-img on the host. Plugin packs may add more (Caddy, jq, ...)
 
 ## Technology Stack
 

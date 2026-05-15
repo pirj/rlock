@@ -1,147 +1,102 @@
-# ai.rlock
+# rlock
 
-Run AI coding agents in full "danger mode" — completely isolated inside QEMU virtual machines. Code stays in the VM, secrets stay on your machine, and the only bridge is git.
+A plugin-driven framework for ephemeral, isolated coding environments on top of QEMU/KVM virtual machines. `rlock` provides the CLI (`rl`), the plugin protocol, and a layered qcow2 snapshot system. The interesting bits — what gets installed inside the VM, how secrets cross the boundary, which agent runs — live in plugin packs that consumers compose on top.
 
-## The Problem
+## Why VMs?
 
-AI coding agents like Claude Code and Codex are powerful but dangerous. They execute arbitrary shell commands, modify files, and install packages. Running them on your host machine means:
+Containers share the host kernel. A determined process inside a container can escape; a hallucinated `rm -rf` can reach the host. Real isolation needs a hypervisor boundary. `rlock` uses [aq](https://github.com/pirj/aq) to spin Alpine VMs in seconds, and a layered snapshot mechanism to keep cold-start cheap.
 
-- A hallucinated `rm -rf /` away from disaster
-- API keys and SSH credentials exposed to untrusted code
-- No rollback when an agent trashes your project
+## What the framework does
 
-Containers (Docker) share the host kernel — a determined agent can escape. You need real isolation.
+- **Plugin protocol** — `plugin.toml` + optional `plugin.sh` hooks. Plugins declare their dependencies, host requirements, triggers, commands, and (optionally) `[snapshot]` participation in the cached layer chain.
+- **Layered snapshots** — every cached layer is a qcow2 file with a parent as its backing. `rl new` walks the chain in plugin order. Cache hits replay state in seconds; misses build on top of the parent and save a new layer. Three strategies (`cached`, `incremental`, `ephemeral`) cover dep installers, tool managers, and one-shot lifecycle plugins like migrations.
+- **Generic plugins shipped here** — `git` (host-as-remote bridge) and `branch` (per-branch VM isolation via `<branch>@<base-sha>` keys).
 
-### Supply Chain Risk
+## Plugin packs
 
-AI agents install packages. Those packages can be compromised. When an agent runs `npm install` or `pip install` on your host, a backdoored dependency gets full access to your filesystem, credentials, and network.
+The interesting use cases live in separate repos that depend on this framework:
 
-This isn't hypothetical:
+- **[ai.rlock](https://github.com/pirj/ai.rlock)** — AI coding-agent sandbox. Provides `auth-proxy` (Caddy reverse proxy that injects API keys host-side), `agent-claude-code`, `agent-codex`. Use this when running Claude Code or Codex in "danger mode" against your codebase.
+- **`<bake>`** (TBD) — CI / pre-baked-environment distribution. Provides `docker-engine`, `docker-compose`, and per-ecosystem dep installers (`mise`, `ruby-bundler`, `npm`, ...). Use this for fast PR sandboxes or local CI.
 
-- **LiteLLM (March 2026)** — Attackers backdoored the [litellm PyPI package](https://docs.litellm.ai/blog/security-update-march-2026) (3.4M downloads/day) via a poisoned Trivy GitHub Action in CI/CD. The compromised versions included a credential stealer that exfiltrated API keys and environment variables — exactly the secrets AI proxy tools handle.
-- **event-stream (2018)** — A maintainer [transferred ownership](https://www.blackduck.com/blog/malicious-dependency-supply-chain.html) of a popular npm package (2M downloads/week) to a stranger who injected code targeting cryptocurrency wallets with balances over 100 BTC.
-- **PyTorch nightly (2022)** — A dependency confusion attack on `torchtriton` let attackers run arbitrary code on machines installing PyTorch nightly builds, exfiltrating hostname, username, and `.gitconfig`.
-
-With `rl`, a compromised package installs inside the VM. It sees dummy API keys, has no access to your host filesystem, and can't reach your SSH keys or git credentials. The blast radius is one disposable VM.
-
-## How It Works
-
-`rl` creates a lightweight virtual machine per repository using [aq](https://github.com/pirj/aq) (QEMU, Alpine Linux). The VM has no access to your host filesystem, credentials, or network identity.
+## Architecture
 
 ```
-┌─────────────────────────────────────┐
-│            Host Machine             │
-│  ┌────────────────┐                 │
-│  │ Caddy Proxy    │ :9110 Anthropic │
-│  │ (injects       │ :9111 OpenAI    │
-│  │  auth headers) │                 │
-│  └───────┬────────┘                 │
-│          │ 10.0.2.2                 │
-│  ════════╪══════════════════════    │
-│          │ QEMU VM                  │
-│  ┌───────┴───────────────────┐      │
-│  │  ↕ git only               │      │
-│  │  Alpine Linux             │      │
-│  │  Claude Code / Codex      │      │
-│  └───────────────────────────┘      │
-└─────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────┐
+│                       Host machine                        │
+│                                                           │
+│  rl (CLI) ──── lib/{plugin,snapshot,toml,...}.sh          │
+│      │                                                    │
+│      ├─→ aq new / start / stop / snapshot                 │
+│      ├─→ qemu-img create -b <cache.qcow2>                 │
+│      └─→ ~/.local/share/aq/cache/<plugin>/<key>/          │
+│                                                           │
+│  ═══════════════════════════════════════════════════════  │
+│                    QEMU VM (Alpine)                       │
+│                                                           │
+│  /home/rlock/repo  ←─ pushed via the `git` plugin's       │
+│                       host-as-remote SSH bridge           │
+└───────────────────────────────────────────────────────────┘
 ```
 
-1. **VM isolation** — the agent runs inside a QEMU VM with its own kernel. No shared filesystem, no host access.
-2. **Secret injection** — API keys never enter the VM. A Caddy reverse proxy on the host intercepts API requests and injects real credentials. The VM only has dummy keys.
-3. **Git bridge** — code moves between host and guest exclusively via git. The host adds the guest as a remote over SSH.
+A plugin pack adds plugins to `PLUGIN_USER_DIR` (default `~/.config/rl/plugins`). The framework discovers them at `rl new`, resolves their dependencies, walks the snapshot chain, and runs their hooks.
 
 ## Commands
 
-### `rl new`
-
-Create a new isolated VM for the current repository.
-
-```
-$ rl new
-  ✓ API proxy ready
-  ✓ VM created
-  ✓ VM booted
-  ✓ SSH ready
-  ✓ Guest provisioned
-Airlock ready: ai.rlock
-```
-
-Provisions an Alpine VM with git, tmux, bash, and mise-en-place. Starts the Caddy proxy if not already running. The VM name is derived from the current directory.
-
-### `rl code`
-
-Connect to the VM's coding session via SSH + tmux.
-
-```
-$ rl code
-```
-
-Attaches to (or creates) a tmux session inside the VM at `/root/repo`. If the VM is stopped, starts it automatically. Detach with `Ctrl-B D` — the session persists.
-
-### `rl status`
-
-Show the current repo's airlock status.
-
-```
-$ rl status
-ai.rlock: running (pid 12345, ssh :2222)
-```
-
-### `rl rm`
-
-Destroy the VM and clean up local state.
-
-```
-$ rl rm
-Removed airlock: ai.rlock
-```
-
-Destroys the VM via `aq rm` and removes the `.rl/` state directory. The Caddy proxy keeps running for other airlocks.
-
-### `rl auth`
-
-Configure API keys for AI agents. Keys are stored in `~/.config/rl/credentials` (chmod 600).
-
-```
-$ rl auth anthropic    # Set Anthropic API key (for Claude Code)
-$ rl auth openai       # Set OpenAI API key (for Codex)
-$ rl auth status       # Show which credentials are configured
-```
-
-Keys can also be provided via environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`). The credential store takes priority over env vars.
-
-### `rl help`
-
-Show usage information.
+| Command | Behavior |
+|---|---|
+| `rl new [plugins...]` | Create a VM for the current repo. Activates plugins explicitly listed or matched by triggers. |
+| `rl rm` | Destroy the current repo's VM. |
+| `rl status` | Show VM state (running / stopped / ssh port). |
+| `rl ssh` | SSH into the VM. |
+| `rl <plugin-cmd>` | Any command a plugin declares in its `plugin.toml` (e.g. `rl branch`). |
 
 ## Prerequisites
 
 | Dependency | Install |
-|------------|---------|
+|---|---|
 | [aq](https://github.com/pirj/aq) | `git clone https://github.com/pirj/aq` |
-| [QEMU](https://www.qemu.org) | `brew install qemu` / `apt install qemu-system` |
-| [Caddy](https://caddyserver.com) | `brew install caddy` / `apt install caddy` |
-| git | Pre-installed on macOS/Linux |
-| ssh | Pre-installed on macOS/Linux |
+| QEMU | `brew install qemu` / `apt install qemu-system` |
+| `qemu-img` | bundled with QEMU |
+| Git, SSH | pre-installed on macOS/Linux |
 
-## Quick Start
+A plugin pack may add more (Caddy for `auth-proxy`, `yq`/`jq` for compose, etc.) — see its README.
+
+## Quick start with a plugin pack
 
 ```sh
-# Install prerequisites (macOS)
-brew install qemu caddy
+# Framework + AI plugin pack:
+git clone git@github.com:pirj/rlock.git
+git clone git@github.com:pirj/ai.rlock.git
+export PATH="$PWD/rlock/bin:$PATH"
+export PLUGIN_USER_DIR="$PWD/ai.rlock/plugins"
 
-# Clone and set up aq
-git clone https://github.com/pirj/aq
-export PATH="$PWD/aq:$PATH"
-
-# Configure API keys
-rl auth anthropic
-
-# Create an airlock and start coding
 cd your-project
 rl new
-rl code
 ```
 
-## p.rlock
+Replace `ai.rlock` with another plugin pack (or layer several into a single directory) to switch use cases.
+
+## Documentation
+
+- [`docs/superpowers/specs/`](docs/superpowers/specs/) — design specs (layered snapshots, plugin protocol, branch isolation, ...).
+- [`docs/superpowers/plans/`](docs/superpowers/plans/) — implementation plans.
+- [`docs/superpowers/benchmarks/`](docs/superpowers/benchmarks/) — measured timings.
+- [`KNOWN-LIMITATIONS.md`](KNOWN-LIMITATIONS.md) — what doesn't work yet.
+
+## Project layout
+
+```
+bin/rl                   CLI dispatcher
+lib/
+  plugin.sh              plugin discovery, dependency resolution, hook execution
+  snapshot.sh            layered qcow2 cache + walk_chain orchestrator
+  toml.sh                tiny TOML reader (flat keys + named sections)
+  util.sh                shared utilities
+  ui.sh                  output helpers (spinner, info, warn, success)
+plugins/
+  git/                   host-as-remote git bridge (generic)
+  branch/                per-branch VM isolation (generic)
+test/                    BATS unit + integration tests
+docs/                    specs, plans, benchmarks
+```

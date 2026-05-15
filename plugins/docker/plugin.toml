@@ -1,6 +1,0 @@
-description = "Docker environment translator (Dockerfile + docker-compose.yml) — DEPRECATED, superseded by docker-in-VM + warm snapshot approach"
-deprecated = "true"
-deps = []
-host_deps = ["yq"]
-triggers = ["Dockerfile", "docker-compose.yml", "docker-compose.yaml"]
-commands = []
