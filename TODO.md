@@ -73,12 +73,33 @@ For the bakeri.sh spec (when written):
    for typical projects, not the docker-engine layer itself.)
 
 Cold-boot optimization reading list.
- - https://depot.dev/blog/optimizing-microvm-boot-times — Firecracker-
-   focused, but several ideas transfer: precomputed initramfs, dropping
-   unused kernel features, skipping init systems with a static rootfs,
-   ahead-of-time partition layout. Not all applicable to Alpine on
-   QEMU (we boot via UEFI + OpenRC, not init=/bin/sh), but base-image
-   slimming and skipping first-boot setup are clear wins.
- - Cross-reference the existing "aq integration to skip first-boot
-   setup" TODO above — same problem, different angle.
- - Belongs in Phase 2 once we measure where the time actually goes.
+
+Reference: https://depot.dev/blog/optimizing-microvm-boot-times — Cloud
+Hypervisor + Firecracker-focused, but several techniques transfer to
+QEMU+Alpine. Mapping their tricks to where we'd apply them:
+
+| Their trick                            | Where to apply in our stack                                                  |
+|----------------------------------------|------------------------------------------------------------------------------|
+| Direct kernel boot                     | base layer (first cold rl new per project, plus CI cold-start on cache miss) |
+| fw_cfg instead of cloud-init for SSH   | base layer provisioning                                                      |
+| kvm-clock + quiet boot, hugepages      | QEMU args in aq — helps warm-restore too                                     |
+| Custom init instead of OpenRC          | Marginal — OpenRC is already light; ~1s saving vs a real compat risk         |
+
+Two layers of the same chart "user runs rl new -> user can work":
+
+ - depot has squeezed the lower layer (sub-second kernel boot) close to
+   the limit and is now climbing into the upper one (experimenting with
+   memory snapshot/restore).
+ - Our spec builds straight on top of the upper layer (memory + disk
+   snapshot of a fully provisioned VM), exploiting project-specific
+   structure (single-tenant, content-addressable cache).
+ - Phase 2 (Firecracker in aq) effectively hooks in the lower layer for
+   free: Firecracker already does direct kernel boot, has no BIOS phase,
+   and uses minimal device emulation. Most of depot's recipe is
+   "build a Firecracker-like environment on top of Cloud Hypervisor" —
+   we skip straight to Firecracker and get those wins by construction.
+
+Cross-references the "aq integration to skip first-boot setup" TODO
+above — same problem from a different angle. Sequence the work after we
+measure where the 30 s warm boot actually spends its time on each layer
+(see "Snapshot analytics" TODO).
