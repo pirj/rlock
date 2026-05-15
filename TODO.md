@@ -71,6 +71,28 @@ For the bakeri.sh spec (when written):
  - Companion measurement: at what point in the chain does caching pay
    off the most? (Likely the docker-compose `up + healthcheck` layer
    for typical projects, not the docker-engine layer itself.)
+ - Do NOT introduce a separate "bare Alpine" snapshot below docker-engine.
+   In bakeri.sh every VM activates docker-engine, so the bare-Alpine
+   layer would always have exactly one descendant (+dockerd) — pure
+   overhead in this distribution.
+
+Framework-base snapshot layer (in rlock itself, not in any distribution).
+ - Today `cmd_new` runs base provisioning (apk add bash curl sudo
+   openssh-server-pam + rlock user + sshd hardening) inline. Skipped on
+   warm path when any plugin has a cache hit, but on FIRST cold run for
+   any project it costs ~15-30 s. Same work runs again on every fresh
+   project.
+ - Promote this into a built-in snapshot layer keyed by the framework's
+   own recipe hash. Shared across every distribution and every project:
+     framework-base
+       |-- ai.rlock chain (+auth-proxy / +agent-* / +git ...)
+       `-- bakeri.sh chain (+docker-engine / +docker-compose / +deps ...)
+ - Requires a way for the framework to participate in walk_chain
+   alongside plugin layers. Cleanest: ship a hidden "core" plugin in
+   rlock with [snapshot] strategy="cached" that produces the framework
+   base, deps = [] so it sorts first.
+ - Measurement first (per Snapshot analytics TODO): confirm the savings
+   are worth the added complexity before implementing.
 
 Cold-boot optimization reading list.
 
