@@ -56,3 +56,29 @@ Subset-detection for snapshot keys.
  - If snapshot_key emits a SET of hashes (one per migration file) and the new set is a strict superset of the cached set, run incremental build instead of fresh rebuild.
  - Requires extending snapshot_key protocol to optionally return a set.
  - Skip until analytics show it would meaningfully reduce rebuild time.
+
+For the bakeri.sh spec (when written):
+ - Document the shared "alpine + dockerd installed" layer.
+ - It already exists by design: docker-engine plugin's snapshot_key is a
+   constant ('docker-engine-recipe-v1'), so the cached qcow2 is shared
+   across all projects that activate docker-engine. Any service stack
+   (kafka in one VM, postgres in another, the layered Rails+PG fixture
+   in a third) chains off the same base.
+ - Measurement TODO: how long does `apk add docker docker-cli-compose`
+   take cold vs. cache-hit rebase to that snapshot? And how big is the
+   snapshot on disk? Currently ~470 MB. If the build is <10s, caching
+   may not be worth the disk cost. Decide before the bakeri.sh release.
+ - Companion measurement: at what point in the chain does caching pay
+   off the most? (Likely the docker-compose `up + healthcheck` layer
+   for typical projects, not the docker-engine layer itself.)
+
+Cold-boot optimization reading list.
+ - https://depot.dev/blog/optimizing-microvm-boot-times — Firecracker-
+   focused, but several ideas transfer: precomputed initramfs, dropping
+   unused kernel features, skipping init systems with a static rootfs,
+   ahead-of-time partition layout. Not all applicable to Alpine on
+   QEMU (we boot via UEFI + OpenRC, not init=/bin/sh), but base-image
+   slimming and skipping first-boot setup are clear wins.
+ - Cross-reference the existing "aq integration to skip first-boot
+   setup" TODO above — same problem, different angle.
+ - Belongs in Phase 2 once we measure where the time actually goes.
