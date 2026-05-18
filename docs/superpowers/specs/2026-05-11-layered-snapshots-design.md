@@ -89,11 +89,71 @@ SH
 
 ### Strategies
 
-| Strategy | Cache lookup | Miss behavior | Use cases |
-|---|---|---|---|
-| `cached` (default) | by current key | Boot fresh on **parent layer**, run `snapshot_build`, save as `<plugin>/<key>/snapshot.qcow2`. | `warm` (compose up), `mise`, `rails-load-db-schema`. Safe default. |
-| `incremental` | by current key | Boot on **most recent snapshot of this plugin** (any key), run `snapshot_build`, save under current key. | `ruby-bundler`, `npm` — additive ops where leftover state is acceptable. |
-| `ephemeral` | never cached | Run `snapshot_build` on parent every `rl new`. Layer state stays in the active VM but never saved to global cache. | `rails-db-migrations`, `rails-db-seeds` — frequently mutated, full rebuilds cheap from clean DB. |
+The `strategy` field in `[snapshot]` controls how a layer interacts with the cache. Three values: `cached` (default), `incremental`, `ephemeral`.
+
+#### Quick reference
+
+| Strategy | Cache lookup | Miss behavior | Build runs against | Saves to cache? | Use cases |
+|---|---|---|---|---|---|
+| `cached` (default) | by current key | Boot fresh on **parent layer**, run `snapshot_build`, save under current key. | Clean parent state. | Yes. | Most layers. Safe default. `warm` (compose up), `mise`, `rails-load-db-schema`. |
+| `incremental` | by current key | Boot on **most recent snapshot of this plugin (any key)**, run `snapshot_build`, save under current key. | Same plugin's previous build (one key behind). | Yes. | Additive ops where leftover state is acceptable. `ruby-bundler`, `npm`. |
+| `ephemeral` | n/a — never cached | Run `snapshot_build` on parent every `rl new`. | Clean parent state (cached layer below). | No. | Frequently mutated, cheap to rebuild. `rails-db-migrations`, `rails-db-seeds`. |
+
+#### `cached` (default)
+
+The standard safe behaviour. Cache hit → reuse. Miss → ditch any previous state for this plugin, rebuild from the parent layer's clean state, save the result under the current key.
+
+**State on rebuild:** every miss starts from the same well-defined parent state — whatever the layer below produced. There is no contamination from prior builds of this plugin under different keys. This means rebuilds are deterministic and the layer's output reflects exactly the current input.
+
+**Trade-off:** rebuilds may redo work that a previous key already accomplished. If only one file in the input changed, the framework still throws away the prior cached entry's content and rebuilds from scratch. For some layers (`compose up`) that's the only safe option, because docker/postgres state can't be trivially "updated" without re-running the whole thing. For dependency installers it can be wasteful — see `incremental`.
+
+**Cache structure:** one entry per unique key, indexed by the key. Multiple entries for the same plugin can coexist (e.g. one per `Dockerfile` content hash); prune evicts old ones.
+
+**Recovery:** since the cached entry is a complete qcow2, deleting it forces a clean rebuild on next miss. No interdependencies between keys.
+
+**Example: `warm` layer (docker-compose up).** Key is hash of `Dockerfile + docker-compose.yml + .dockerignore`. On `Dockerfile` change, the cached entry is invalid — we cannot partially update a `compose up`'d stack to a new image set, so we boot fresh, `compose pull` + `compose up`, snapshot. Rebuild is expensive (~30–60s on cold cache) but safe.
+
+#### `incremental`
+
+A specialization of `cached` for additive operations. Cache hit → reuse. Miss → instead of booting from the parent layer, boot from **this plugin's most recent cached snapshot** (whichever key was last saved), then run `snapshot_build` on top of that warm state, save under the current key.
+
+**State on rebuild:** the build starts not from a clean parent but from the LAST cached state this plugin produced. Whatever that previous build deposited (installed gems, downloaded npm tarballs) carries over. The current build just adds whatever's new.
+
+**Trade-off:** rebuilds are much faster (already-installed deps don't reinstall, no network) at the cost of accumulating leftover state — orphan gems no longer in `Gemfile.lock`, removed packages, etc. The leftover is harmless for correctness (the build still produces what `Gemfile.lock` demands) but bloats the layer over time. Periodic clean rebuild recommended.
+
+**Cache structure:** same as `cached` — one entry per unique key. Plus the framework maintains a "most recent" pointer per plugin so the next miss knows where to fork.
+
+**Why "additive" matters:** `bundle install`, `npm ci`, `pip install` all behave correctly when run on top of an already-installed environment. They reconcile installed state with the lockfile, removing nothing automatically. If your tool would mutate or remove existing state on rerun (e.g. `rm -rf node_modules && npm ci`), use `cached` instead.
+
+**Recovery:** if the chain of incremental snapshots is corrupted (e.g. someone deleted the latest entry mid-chain), the next miss simply forks from whatever entry IS still present. Worst case: no entries left → behaves like `cached`, rebuilds from parent layer.
+
+**Example: `ruby-bundler`.** Key is hash of `Gemfile.lock`. Last cached entry under `Gemfile.lock@rev42` has `vendor/bundle` populated with everything `Gemfile.lock@rev42` declared. On miss under `Gemfile.lock@rev43`, fork that entry, run `bundle install` — bundler downloads/installs only the gems that differ. Done in seconds versus minutes from scratch. Orphans from `rev42` that `rev43` no longer needs stay in `vendor/bundle` — acceptable.
+
+#### `ephemeral`
+
+No caching at all. Cache lookup is skipped entirely; `snapshot_build` runs on every `rl new`, on top of whatever the parent layer produced.
+
+**State on rebuild:** always clean parent state — same as `cached`-miss path, but every time.
+
+**Trade-off:** zero disk cost in cache, but pays the full build cost on every fresh VM. Worth it when:
+- The build is cheap relative to its rebuild frequency (e.g. seconds to apply DB migrations).
+- The output is too volatile to cache usefully (every PR has new migrations or new seed values, so cache hit rate would be near zero anyway).
+- Storing the live state in a snapshot would be wasteful (no other VM would benefit from this specific DB state).
+
+**Build runs on top of parent's running VM state.** The framework boots the VM with the parent layer as backing, runs `snapshot_build`, leaves the VM running — there's no save step. The next plugin's build (or the final VM that the user lands in) sees the layer's effects in-place on the VM's storage.qcow2.
+
+**Why a strategy at all instead of "just don't declare `[snapshot]`":** because the plugin still participates in the chain — it has a position in `resolve_deps` order and runs `snapshot_build` at the right point relative to other layers. Plugins WITHOUT a `[snapshot]` section don't participate at all (no orchestration); they just run as `provision` hooks today.
+
+**Example: `rails-db-migrations`.** On every fresh VM, run `bundle exec rails db:migrate`. Cheap because the parent layer already has the DB up and the rails app loaded. No cache to invalidate, no orphans to manage. If a migration was renamed or removed (rare but real), the next `rl new` simply gets the latest correct schema for free.
+
+#### Choosing a strategy
+
+| Situation | Strategy |
+|---|---|
+| The build mutates external state (databases, running services) and re-running on existing state isn't safe. | `cached` |
+| The build is additive — running it again only adds, never overwrites. Output is hash-deterministic per input. | `incremental` |
+| The build is fast AND its inputs change often AND nobody else would reuse its cached output. | `ephemeral` |
+| Anything else / not sure. | `cached` |
 
 ### Cache layout
 
