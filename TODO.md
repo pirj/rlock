@@ -21,14 +21,14 @@ and other backends https://github.com/microvm-nix/microvm.nix#hypervisors
 
 linux host
 
-aq integration to skip first-boot setup on warm path.
- - Step 0 benchmark: warm rl new = 30s wall-clock. ~15s of that is aq's automatic
-   first-boot setup (sfdisk + resize2fs) which runs on every fresh `aq new` even
-   when we immediately rebase the disk to a cached qcow2.
- - Need an aq mode equivalent to `aq new --backed-by=<qcow2> --no-first-boot` or
-   `aq new --from-snapshot=<tag>` that hands us an already-set-up disk.
- - Belongs to Phase 2 (firecracker + aq snapshot-aware backend).
- - Without this, sub-second warm boot from the original spec is unreachable.
+[RESOLVED in aq v2.4.0 "Bolt"] aq integration to skip first-boot setup on warm path.
+ - The 15s sfdisk + resize2fs round-trip was eliminated by aq's per-size base
+   catalog: each `alpine-base-<v>-<arch>-NG.raw` is pre-partitioned at full N
+   from the start, no first-boot resize needed. Combined with direct kernel
+   boot (also v2.4.0), `aq start` of a fresh VM is now ~6.3s on macOS HVF.
+ - Sub-second warm boot is now achievable via the in-progress `kind = "live"`
+   snapshot mechanism (see specs/2026-05-18-snapshot-kind-design.md), which
+   captures memory state post-OpenRC + sshd ready.
 
 Caddy-based caching mirror for language registries (rubygems.org, registry.npmjs.org, PyPI, etc.).
  - Extend auth-proxy plugin (or sibling plugin) with cache-only reverse proxies.
@@ -106,6 +106,33 @@ Framework-base snapshot layer (in rlock itself, not in any distribution).
    base, deps = [] so it sorts first.
  - Measurement first (per Snapshot analytics TODO): confirm the savings
    are worth the added complexity before implementing.
+
+Linear chain limitation (deferred from layered-snapshots design).
+ - qcow2 backing files are linear, so two sibling plugins (e.g. ruby-bundler
+   and npm both depending only on mise) serialize in load order even though
+   they're semantically independent. Acceptable for v1 but introduces
+   unnecessary rebuild latency when only one of the sibling layers churns.
+ - Possible fixes: per-sibling fork-and-merge of cached layers (complex), or
+   merge-on-build into a single combined layer (loses cache-hit granularity).
+ - Defer until analytics show siblings frequently rebuild in isolation.
+
+Out-of-band Docker state persistence — `rl warm rebuild` command.
+ - `docker volume create` / images pulled by the user during an `rl code`
+   session don't persist to the cached warm layer automatically. Next fresh
+   `rl new` starts from the cached warm and loses that work.
+ - Proposed surface: explicit `rl warm rebuild` that snapshots the CURRENT
+   running VM into the warm cache slot. User controls when to promote
+   live tweaks into the cached snapshot.
+ - From specs/2026-05-11-layered-snapshots-design.md "Known limitations".
+
+Cross-machine snapshot transport.
+ - Cached snapshots are host-local under ~/.local/share/aq/cache/. For CI
+   fleets and team setups, sharing the cache across machines is
+   significant — depot.dev built an OCI-compatible registry for this
+   (chunk-level caching of disk + memory snapshots).
+ - From specs/2026-05-18-snapshot-kind-design.md "Out of scope / follow-ups".
+ - Bakeri.sh follow-up — not in MVP. Revisit when bakeri.sh hits multi-
+   machine fleet use.
 
 Cold-boot optimization reading list.
 
