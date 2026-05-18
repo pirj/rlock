@@ -76,18 +76,18 @@ For the bakeri.sh spec (when written):
    layer would always have exactly one descendant (+dockerd) — pure
    overhead in this distribution.
 
-aq --memory=NG flag.
+aq --memory=NG flag + live-snapshot RAM hotplug.
  - aq guests are hardcoded to -m 1G. Many kind=live snapshot consumers
    (especially Docker workloads under bakeri.sh) need 4-8 GiB to be
    meaningful: even a small compose stack with postgres + redis blows
    past 1 GiB working set.
- - Parallel to the existing --size=NG flag. Per-VM choice, not per-base
-   (the RAM allocation happens at aq start time, not at base build).
- - Belongs in aq, not in rlock. Tracked here because consumers of the
-   "snapshot kind = live" mechanism (see specs/2026-05-18-snapshot-kind-
-   design.md) need it.
- - Tie-in: live snapshots' meta.json must record the RAM size; restore
-   refuses on RAM mismatch (otherwise QEMU just fails opaquely).
+ - Two related deliverables, both tracked in aq/ROADMAP.md (canonical
+   location): (a) `aq new --memory=NG` flag + meta.json ram_size_mb
+   pinning; (b) memory hotplug for grow-after-restore via QMP device_add
+   pc-dimm, contingent on launching source VMs with -m N,maxmem=M,slots=K.
+ - Cross-referenced here because consumers of "snapshot kind = live"
+   (see specs/2026-05-18-snapshot-kind-design.md) need both before they
+   can declare kind = "live" on Docker-class workloads.
 
 Framework-base snapshot layer (in rlock itself, not in any distribution).
  - Today `cmd_new` runs base provisioning (apk add bash curl sudo
