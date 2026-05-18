@@ -66,25 +66,28 @@ distribution (rlock vs ai.rlock vs bakeri.sh) should pick per layer.
 - Memory hotplug after live-snapshot restore. Architectural placeholder
   only (see "RAM size pinning" below).
 
-## Required aq change: `aq new --memory=NG`
+## Required aq change: `aq new --memory=NG` [shipped in aq v2.5.0]
 
 Live snapshots are useful only when the snapshot is taken at a RAM size
-that matches the workload, and aq's current hardcoded `-m 1G` is too
-small for Docker (and many other application stacks). Before this spec
-can land usefully, **aq grows a `--memory=NG` flag parallel to
-`--size=NG`**, and the framework (and any distribution that declares
-`kind = "live"`) **must explicitly choose a RAM size per plugin or per
-project** rather than inheriting aq's default.
+that matches the workload, and aq's old hardcoded `-m 1G` was too small
+for Docker (and many other application stacks). aq v2.5.0 "RAM" ships
+`aq new --memory=NG` parallel to `--size=NG`, and records `ram_size_mb`
+in live snapshot `meta.json`. The framework (and any distribution that
+declares `kind = "live"`) **must explicitly choose a RAM size per
+plugin or per project** rather than inheriting aq's default 1G.
 
 Concretely:
 
-- `aq new --size=8G --memory=4G ...` becomes the explicit form.
+- `aq new --size=8G --memory=4G ...` is the explicit form.
 - A `[snapshot]` section with `kind = "live"` SHOULD pair with an
   explicit `memory = "4G"` declaration (either on the same plugin, or
   hoisted to the distribution / project level). The framework refuses
   to take a live snapshot if RAM isn't pinned.
-- The `aq --memory=NG` flag itself is tracked as an aq follow-up; see
-  `aq/TODO.md` and `rlock/TODO.md`.
+- aq v2.5.0's `aq new --from-snapshot=<live-tag>` auto-fills `--memory`
+  from the snapshot's recorded `ram_size_mb` when the user didn't pass
+  the flag, and refuses on mismatch. Framework code doesn't need to
+  duplicate that check — but the live-save side must ensure RAM is
+  pinned at the moment of save.
 
 For pure `kind = "cold"` consumers, RAM size is still free to vary —
 cold snapshots aren't sensitive to it.
@@ -245,16 +248,17 @@ restore via stub VM ops.
   quietly adds RAM-size + delta per cached entry (4 GiB+ for Docker
   workloads). The framework should emit a one-line "Saving live
   snapshot (~4.2 GiB)" message on save so the user notices.
-- **RAM-size pinning enforcement** — without the refusal-on-mismatch
-  check in `meta.json`, a wrong-size restore fails opaquely in QEMU
-  migration with cryptic messages. The framework's check must land
-  alongside `--memory=NG` support in aq.
+- **RAM-size pinning enforcement** — solved in aq v2.5.0: live snapshot
+  `meta.json` records `ram_size_mb` and `aq new --from-snapshot=<live>`
+  refuses size mismatches. Framework just needs to ensure its plugins
+  pin RAM at save time (not 1G default).
 
 ## Out of scope / follow-ups
 
-- **`aq --memory=NG` flag** — parallel to `--size`. Tracked in aq, not
-  this spec. Many `kind=live` layers will only earn their keep when aq
-  guests can be sized to 4-8 GiB.
+- **Memory hotplug for grow-after-restore** — aq snapshots bind RAM
+  size today; the path to grow without rebuilding (source VM launched
+  with `-m N,maxmem=M,slots=K`, post-restore QMP `device_add pc-dimm`)
+  is tracked in aq/ROADMAP.md. Out of scope here.
 - **Auto-tuning** — see Snapshot analytics in TODO.
 - **Snapshot prune for live entries** — same algorithm as today, but
   live entries should be the first to evict under disk pressure given
