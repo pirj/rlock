@@ -55,6 +55,23 @@ plugin_snapshot_strategy() {
     esac
 }
 
+# Print the snapshot kind declared by a plugin.
+# Defaults to "cold" when [snapshot] is present but kind is unset.
+# Returns 1 with an error on unknown kind.
+# See specs/2026-05-18-snapshot-kind-design.md for the cold/live tradeoff.
+plugin_snapshot_kind() {
+    local plugin="$1"
+    local pdir
+    pdir=$(plugin_dir "$plugin") || return 1
+    local k
+    k=$(toml_get_in_section "$pdir/plugin.toml" "snapshot" "kind")
+    k="${k:-cold}"
+    case "$k" in
+        cold|live) echo "$k" ;;
+        *) echo "Plugin '$plugin' declares unknown snapshot kind '$k'" >&2; return 1 ;;
+    esac
+}
+
 # Discover all available plugins.
 # Prints plugin names (one per line), sorted alphabetically.
 discover_plugins() {

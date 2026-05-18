@@ -51,6 +51,27 @@ _make_plugin() {
     assert_output --partial "unknown snapshot strategy"
 }
 
+@test "plugin_snapshot_kind defaults to cold when empty" {
+    _make_plugin "pk1" 'description = "P"' '[snapshot]' 'strategy = "cached"'
+    run plugin_snapshot_kind "pk1"
+    assert_success
+    assert_output "cold"
+}
+
+@test "plugin_snapshot_kind reads explicit live value" {
+    _make_plugin "pk2" 'description = "P"' '[snapshot]' 'strategy = "cached"' 'kind = "live"'
+    run plugin_snapshot_kind "pk2"
+    assert_success
+    assert_output "live"
+}
+
+@test "plugin_snapshot_kind rejects unknown value" {
+    _make_plugin "pk3" 'description = "P"' '[snapshot]' 'strategy = "cached"' 'kind = "warm"'
+    run plugin_snapshot_kind "pk3"
+    assert_failure
+    assert_output --partial "unknown snapshot kind"
+}
+
 @test "plugin_protocol_version returns declared version" {
     _make_plugin "p6" 'protocol_version = "1"' 'description = "P"'
     run plugin_protocol_version "p6"

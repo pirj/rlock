@@ -7,12 +7,14 @@ RL_CACHE_DIR="${RL_CACHE_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/aq/cache}"
 
 # Resolve the cache path for a given (plugin, key) pair.
 # Usage: snapshot_cache_path plugin key
+# Returns the path to the cache entry's disk file (disk.qcow2).
+# Live entries additionally have memory.bin alongside it.
 snapshot_cache_path() {
     local plugin="$1" key="$2"
-    echo "$RL_CACHE_DIR/$plugin/$key/snapshot.qcow2"
+    echo "$RL_CACHE_DIR/$plugin/$key/disk.qcow2"
 }
 
-# If a snapshot exists for (plugin, key), print its path and return 0.
+# If a snapshot exists for (plugin, key), print its disk path and return 0.
 # Otherwise return non-zero with no output.
 snapshot_lookup() {
     local plugin="$1" key="$2"
@@ -28,24 +30,71 @@ snapshot_latest() {
     local dir="$RL_CACHE_DIR/$plugin"
     [[ -d "$dir" ]] || return 1
     local newest
-    newest=$(find "$dir" -name snapshot.qcow2 -type f -print 2>/dev/null \
+    newest=$(find "$dir" -name disk.qcow2 -type f -print 2>/dev/null \
         | xargs -r ls -t 2>/dev/null \
         | head -1)
     [[ -n "$newest" ]] && { echo "$newest"; return 0; } || return 1
 }
 
-# Save a VM's current qcow2 disk as a cached layer snapshot.
-# Usage: snapshot_save src_qcow2 plugin key parent_plugin parent_key
+# Read the kind of a cache entry from its meta.json. Returns "cold" if the
+# entry has no kind field (back-compat with pre-snapshot-kind entries).
+# Usage: snapshot_entry_kind <disk-path>
+snapshot_entry_kind() {
+    local disk="$1"
+    local meta
+    meta="$(dirname "$disk")/meta.json"
+    [[ -f "$meta" ]] || { echo cold; return 0; }
+    local k
+    k=$(grep -E '"kind":' "$meta" 2>/dev/null \
+        | sed -E 's/.*"kind": "([^"]*)".*/\1/' \
+        | head -1)
+    echo "${k:-cold}"
+}
+
+# Save a VM's current state as a cached layer snapshot.
+# Usage: snapshot_save vm plugin key kind parent_plugin parent_key
+#
+# kind=cold: VM must be stopped. Disk is copied via qemu-img convert.
+# kind=live: VM must be running. We shell out to `aq snapshot create` to
+#            capture memory + disk via QMP migrate, then move the resulting
+#            files into the framework cache directory and delete the aq tag.
+#
 # parent_plugin / parent_key may be empty strings.
 snapshot_save() {
-    local src="$1" plugin="$2" key="$3" parent_plugin="${4:-}" parent_key="${5:-}"
+    local vm="$1" plugin="$2" key="$3" kind="$4" parent_plugin="${5:-}" parent_key="${6:-}"
     local dir="$RL_CACHE_DIR/$plugin/$key"
     mkdir -p "$dir"
-    qemu-img convert -O qcow2 "$src" "$dir/snapshot.qcow2"
+
+    case "$kind" in
+        cold)
+            local src_disk
+            src_disk=$(snapshot_walk_vm_disk "$vm")
+            qemu-img convert -O qcow2 "$src_disk" "$dir/disk.qcow2"
+            ;;
+        live)
+            # aq snapshot create captures memory + disk while VM is running,
+            # writing to ~/.local/share/aq/snapshots/<arch>/<tag>/{disk.qcow2,memory.bin}.
+            # We use a unique internal tag, then move the files into the
+            # framework cache and clean up the tag.
+            local tag="__rl_cache_${plugin}_${key:0:32}_$$"
+            aq snapshot create "$vm" "$tag" >/dev/null
+            local aq_dir
+            aq_dir=$(snapshot_aq_tag_dir "$tag")
+            mv "$aq_dir/disk.qcow2" "$dir/disk.qcow2"
+            mv "$aq_dir/memory.bin" "$dir/memory.bin"
+            aq snapshot rm --force "$tag" >/dev/null 2>&1 || true
+            ;;
+        *)
+            echo "snapshot_save: unknown kind '$kind' (expected cold|live)" >&2
+            return 1
+            ;;
+    esac
+
     cat > "$dir/meta.json" <<META
 {
   "plugin": "$plugin",
   "key": "$key",
+  "kind": "$kind",
   "parent_plugin": "$parent_plugin",
   "parent_key": "$parent_key",
   "built_at": "$(date -u +%FT%TZ)"
@@ -80,22 +129,55 @@ snapshot_walk_vm_stop() {
     aq stop "$vm" >/dev/null 2>&1 || true
 }
 
+# Resolve the host-side directory where aq stores a snapshot tag's files.
+# Overridable via AQ_STATE_DIR + ARCH; tests may stub.
+snapshot_aq_tag_dir() {
+    local tag="$1"
+    local arch="${ARCH:-$(uname -m)}"
+    case "$arch" in arm64) arch=aarch64 ;; esac
+    echo "$AQ_STATE_DIR/snapshots/$arch/$tag"
+}
+
 snapshot_walk_vm_rebase() {
     # Replace VM disk with a new qcow2 backed by the given file.
+    # If the cache entry alongside the backing file is a live snapshot,
+    # also place memory.bin as the VM's incoming-memory.bin so the next
+    # `aq start` resumes via `-incoming file:...`.
     local vm="$1" backing="$2"
-    local disk
+    local disk vm_dir kind cache_dir
     disk=$(snapshot_walk_vm_disk "$vm")
+    vm_dir=$(dirname "$disk")
     rm -f "$disk"
     snapshot_rebase "$disk" "$backing"
+
+    # Always clear stale incoming-memory.bin from previous iterations.
+    rm -f "$vm_dir/incoming-memory.bin"
+
+    kind=$(snapshot_entry_kind "$backing")
+    if [[ "$kind" == "live" ]]; then
+        cache_dir=$(dirname "$backing")
+        if [[ -f "$cache_dir/memory.bin" ]]; then
+            cp "$cache_dir/memory.bin" "$vm_dir/incoming-memory.bin"
+        fi
+    fi
 }
 
 # Walk the layer chain for an ordered plugin list.
 # Usage: snapshot_walk_chain vm plugin1 [plugin2 ...]
-# For each plugin with [snapshot]:
-#   * cached: lookup by current key; on miss, boot on parent, run snapshot_build, save.
-#   * incremental: lookup by current key; on miss, boot on latest-of-plugin (if any),
-#                  else parent, run snapshot_build, save under current key.
-#   * ephemeral: never cached. Boot on parent, run snapshot_build, do not save.
+#
+# Strategy controls cache lookup and miss-time fork-point:
+#   * cached:      lookup by current key; miss → boot on parent, build, save.
+#   * incremental: lookup by current key; miss → boot on latest-of-plugin
+#                  (any key) else parent, build, save under current key.
+#   * ephemeral:   never cached. Boot on parent, build, do not save.
+#
+# Kind controls snapshot capture format (cached / incremental only):
+#   * cold: VM stopped, qemu-img convert disk into cache. Restore on next
+#           run = qemu-img rebase. No memory captured.
+#   * live: VM running, aq snapshot create captures memory + disk via QMP.
+#           Restore places memory.bin as incoming-memory.bin so the next
+#           `aq start` resumes mid-flight via `-incoming file:...`.
+#
 # Plugins without [snapshot] are skipped here (provision is run elsewhere).
 snapshot_walk_chain() {
     local vm="$1"; shift
@@ -104,10 +186,11 @@ snapshot_walk_chain() {
     # Each iteration may rebase the VM disk; the VM must be stopped first.
     snapshot_walk_vm_stop "$vm"
 
-    local plugin strategy key cache_path latest disk
+    local plugin strategy kind key cache_path latest
     for plugin in "$@"; do
         plugin_has_snapshot "$plugin" || continue
         strategy=$(plugin_snapshot_strategy "$plugin")
+        kind=$(plugin_snapshot_kind "$plugin")
         key=$(run_hook "$plugin" "snapshot_key")
 
         # Cache hit (cached + incremental only)
@@ -117,7 +200,7 @@ snapshot_walk_chain() {
             continue
         fi
 
-        # Miss: pick the right backing
+        # Miss: pick the right backing for the build
         if [[ "$strategy" == "incremental" ]]; then
             if latest=$(snapshot_latest "$plugin" 2>/dev/null); then
                 snapshot_walk_vm_rebase "$vm" "$latest"
@@ -125,19 +208,33 @@ snapshot_walk_chain() {
                 snapshot_walk_vm_rebase "$vm" "$parent_path"
             fi
         fi
-        # For cached: VM is already on parent's qcow2 (or initial base).
+        # For cached: VM is already on parent's qcow2 (rebased on previous
+        # iteration's cache hit, or initial backing).
         # For ephemeral: same — run on whatever the VM disk currently is.
 
         snapshot_walk_vm_boot "$vm"
         run_hook "$plugin" "snapshot_build" "$vm"
-        snapshot_walk_vm_stop "$vm"
 
-        if [[ "$strategy" != "ephemeral" ]]; then
-            disk=$(snapshot_walk_vm_disk "$vm")
-            snapshot_save "$disk" "$plugin" "$key" "$parent_plugin" "$parent_key"
-            parent_plugin="$plugin"; parent_key="$key"
-            parent_path=$(snapshot_cache_path "$plugin" "$key")
+        if [[ "$strategy" == "ephemeral" ]]; then
+            # No save, no stop — the layer's effects stay on the VM disk
+            # for whatever follows.
+            continue
         fi
+
+        if [[ "$kind" == "live" ]]; then
+            # Capture while running, then stop so the next iteration's
+            # rebase has a clean disk file.
+            snapshot_save "$vm" "$plugin" "$key" "live" "$parent_plugin" "$parent_key"
+            snapshot_walk_vm_stop "$vm"
+        else
+            # Cold capture: must stop first so qemu-img convert sees a
+            # consistent disk.
+            snapshot_walk_vm_stop "$vm"
+            snapshot_save "$vm" "$plugin" "$key" "cold" "$parent_plugin" "$parent_key"
+        fi
+
+        parent_plugin="$plugin"; parent_key="$key"
+        parent_path=$(snapshot_cache_path "$plugin" "$key")
     done
 }
 
@@ -172,13 +269,20 @@ snapshot_prune() {
             continue
         fi
 
-        local size
+        local size mem mem_size
         size=$(stat -f%z "$snap" 2>/dev/null || stat -c%s "$snap" 2>/dev/null || echo 0)
+        # If this is a live entry, also drop memory.bin (much bigger than disk).
+        mem="$(dirname "$snap")/memory.bin"
+        if [[ -f "$mem" ]]; then
+            mem_size=$(stat -f%z "$mem" 2>/dev/null || stat -c%s "$mem" 2>/dev/null || echo 0)
+            size=$((size + mem_size))
+            rm -f "$mem"
+        fi
         rm -f "$snap" "$(dirname "$snap")/meta.json"
         rmdir "$(dirname "$snap")" 2>/dev/null || true
         removed=$((removed + 1))
         freed_bytes=$((freed_bytes + size))
-    done < <(find "$RL_CACHE_DIR" -name snapshot.qcow2 -type f 2>/dev/null)
+    done < <(find "$RL_CACHE_DIR" -name disk.qcow2 -type f 2>/dev/null)
 
     if [[ $removed -gt 0 ]]; then
         local mb=$((freed_bytes / 1024 / 1024))
