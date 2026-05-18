@@ -61,12 +61,33 @@ distribution (rlock vs ai.rlock vs bakeri.sh) should pick per layer.
 - Auto-tuning `kind` based on observed memory usage. Out of scope; a
   future analytics-driven optimization (already tracked in TODO under
   Snapshot analytics).
-- Configurable VM RAM beyond aq's current `-m 1G`. Many docker-heavy
-  workloads need 4-8 GiB. That is an `aq` change (a `--memory=NG`
-  flag analogous to `--size=NG`), tracked separately. The live-snapshot
-  cost analysis below assumes whatever RAM `aq` is configured for.
 - Cross-machine snapshot transport / cache sync. Cached snapshots stay
   per-host.
+- Memory hotplug after live-snapshot restore. Architectural placeholder
+  only (see "RAM size pinning" below).
+
+## Required aq change: `aq new --memory=NG`
+
+Live snapshots are useful only when the snapshot is taken at a RAM size
+that matches the workload, and aq's current hardcoded `-m 1G` is too
+small for Docker (and many other application stacks). Before this spec
+can land usefully, **aq grows a `--memory=NG` flag parallel to
+`--size=NG`**, and the framework (and any distribution that declares
+`kind = "live"`) **must explicitly choose a RAM size per plugin or per
+project** rather than inheriting aq's default.
+
+Concretely:
+
+- `aq new --size=8G --memory=4G ...` becomes the explicit form.
+- A `[snapshot]` section with `kind = "live"` SHOULD pair with an
+  explicit `memory = "4G"` declaration (either on the same plugin, or
+  hoisted to the distribution / project level). The framework refuses
+  to take a live snapshot if RAM isn't pinned.
+- The `aq --memory=NG` flag itself is tracked as an aq follow-up; see
+  `aq/TODO.md` and `rlock/TODO.md`.
+
+For pure `kind = "cold"` consumers, RAM size is still free to vary —
+cold snapshots aren't sensitive to it.
 
 ## Design
 
@@ -133,11 +154,43 @@ rather than `aq new` + rebase.
 
 | Aspect | `cold` | `live` |
 |---|---|---|
-| Disk per cached entry | ~10-500 MiB (sparse delta only) | ~1 GiB + delta (RAM dump + delta) |
+| Disk per cached entry | ~10-500 MiB (sparse delta only) | depends on RAM (~1 GiB at -m 1G, ~4 GiB at -m 4G) + sparse delta |
 | Warm `aq start` after cache hit | ~6 s (Phase 2 direct kernel boot) | ~2 s (memory resume, no boot) |
-| Sensitive to Alpine version bump | Yes (kernel/userspace in disk) | Yes (RAM contains process state from old kernel) |
-| Sensitive to RAM-size change in aq | No | Yes (snapshot RAM size must match) |
-| Snapshot creation time | Fast (qemu-img convert, sparse) | Slower (full RAM dump, ~1 GiB write) |
+| Snapshot creation time | Fast (`qemu-img convert`, sparse) | Slower (full RAM dump, equals -m size) |
+| Sensitive to RAM-size change in aq | No | Yes — snapshot binds the RAM size it was captured at (see "RAM size pinning" below) |
+
+**Alpine version bumps are not a concern for either kind.** The base
+catalog is per-version (`alpine-base-3.22.4-...`, `alpine-base-3.22.5-...`
+co-exist as independent files). A snapshot is tied to a specific base
+via its qcow2 backing chain, so adding a new Alpine version doesn't
+invalidate snapshots taken under older versions — they continue to work
+as long as their backing file is still present. Snapshot prune policy
+(out of scope here) is the only way these can be lost.
+
+### RAM size pinning for `live` snapshots
+
+A live snapshot's `memory.bin` is the dump of guest physical RAM at the
+moment of capture. The kernel that produced it set up its memory
+subsystem (zones, page tables, allocator) for that exact size. Restoring
+under a different `-m` value requires the kernel to learn about the
+delta, which only memory hotplug can do.
+
+Practical rules:
+
+- **Same `-m` restore is the supported default.** Framework records
+  `ram_size_mb` in the live snapshot's `meta.json` and refuses `aq new
+  --from-snapshot=<tag>` if the new VM is configured for a different
+  size. This avoids opaque QEMU migration failures.
+- **Growing RAM after restore is possible via memory hotplug.** The
+  source VM must be launched with `maxmem` reserved
+  (`-m 1G,maxmem=8G,slots=4`), and after `-incoming` resume the host
+  uses QMP `device_add pc-dimm` to plug in additional DIMMs. This is a
+  follow-up — not in scope for this spec — but the design does not
+  preclude it: `meta.json` will also record `ram_max_mb` so future
+  consumers can detect headroom.
+- **Shrinking RAM after restore is not realistic.** Memory ballooning
+  can return guest pages to the host opportunistically, but the
+  kernel's view of total RAM at boot is fixed. We don't support this.
 
 ### Recommended `kind` by plugin type (initial heuristic)
 
@@ -183,22 +236,19 @@ restore via stub VM ops.
 
 ## Risks
 
-- **Live-snapshot incompatibility with kernel updates** — same as cold.
-  Phase 2's boot_mode_checksum machinery (in aq) already refuses
-  mismatched live restores. No new mechanism needed at the framework
-  layer.
-- **Restore path divergence** — `aq new --from-snapshot=...` vs `aq new`
-  + qemu-img rebase have different semantics around overlays. Pure cold
-  chains may not need the snapshot-restore path. Implementation must
+- **Restore path divergence** — `aq new --from-snapshot=...` (consumes
+  memory.bin) vs `aq new` + `qemu-img` rebase have different semantics
+  around overlays. Pure cold chains don't need the snapshot-restore
+  path; chains with any live ancestor must use it. The framework must
   detect ancestor `kind` and pick consistently.
-- **Disk cost surprise** — a layer flipped from `cold` to `live` quietly
-  adds 1 GiB+ per cached entry. Framework should emit a one-line
-  "Saving live snapshot (~1.2 GiB)" message on save so the user notices.
-- **Distribution dependence on aq RAM size** — if aq later raises the
-  default `-m` value, all `kind=live` layers cached at the old size are
-  invalid. The framework's existing snapshot incompatibility refusal
-  (boot_mode checksum) covers boot mode but not RAM size. Add a
-  `ram_size` field to live snapshot `meta.json` and refuse on mismatch.
+- **Disk cost surprise** — a layer flipped from `cold` to `live`
+  quietly adds RAM-size + delta per cached entry (4 GiB+ for Docker
+  workloads). The framework should emit a one-line "Saving live
+  snapshot (~4.2 GiB)" message on save so the user notices.
+- **RAM-size pinning enforcement** — without the refusal-on-mismatch
+  check in `meta.json`, a wrong-size restore fails opaquely in QEMU
+  migration with cryptic messages. The framework's check must land
+  alongside `--memory=NG` support in aq.
 
 ## Out of scope / follow-ups
 
