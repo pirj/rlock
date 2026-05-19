@@ -100,14 +100,14 @@ Linear chain limitation (deferred from layered-snapshots design).
    merge-on-build into a single combined layer (loses cache-hit granularity).
  - Defer until analytics show siblings frequently rebuild in isolation.
 
-Out-of-band Docker state persistence — `rl warm rebuild` command.
- - `docker volume create` / images pulled by the user during an `rl code`
-   session don't persist to the cached warm layer automatically. Next fresh
-   `rl new` starts from the cached warm and loses that work.
- - Proposed surface: explicit `rl warm rebuild` that snapshots the CURRENT
-   running VM into the warm cache slot. User controls when to promote
-   live tweaks into the cached snapshot.
- - From specs/2026-05-11-layered-snapshots-design.md "Known limitations".
+[done 2026-05-19, commit f097dd6] `rl warm rebuild` — promotes the
+running VM's current state into the topmost cached snapshot layer's
+slot. Finds the topmost active plugin with `[snapshot]`, re-computes
+its key, and overwrites $RL_CACHE_DIR/<plugin>/<key>/ (cold:
+qemu-img convert; live: aq snapshot create). `snapshot_save` is
+overwrite-safe — prior disk.qcow2 / memory.bin / meta.json are dropped
+before writing so cold→live or live→cold promotions leave a clean
+slot. 118/118 bats.
 
 [done 2026-05-19, commit 003cfe2] snapshot_walk_vm_rebase loses earlier live layers' memory.bin. Fix: only touch incoming-memory.bin when the new layer is live (overwrite); on cold rebase, preserve. snapshot_walk_chain clears once at the start and before a miss-build boot. 3 new bats, 100/100.
 
