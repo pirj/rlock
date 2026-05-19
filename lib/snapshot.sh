@@ -229,6 +229,7 @@ snapshot_walk_chain() {
         # Cache hit (cached + incremental only)
         if [[ "$strategy" != "ephemeral" ]] && cache_path=$(snapshot_lookup "$plugin" "$key"); then
             snapshot_walk_vm_rebase "$vm" "$cache_path"
+            snapshot_stats_record_hit "$plugin"
             parent_plugin="$plugin"; parent_key="$key"; parent_path="$cache_path"
             continue
         fi
@@ -252,12 +253,18 @@ snapshot_walk_chain() {
         # disk content). Clear it for this iteration.
         rm -f "$_vm_dir/incoming-memory.bin"
 
+        # Time the miss-path build for snapshot_stats. SECONDS is a bash
+        # builtin counting whole seconds since shell start — second-level
+        # resolution is enough for the ~tens-of-seconds rebuild we see in
+        # practice and avoids a python3 / coreutils-gdate dependency.
+        local _build_t0=$SECONDS
         snapshot_walk_vm_boot "$vm"
         run_hook "$plugin" "snapshot_build" "$vm"
 
         if [[ "$strategy" == "ephemeral" ]]; then
             # No save, no stop — the layer's effects stay on the VM disk
             # for whatever follows.
+            snapshot_stats_record_miss "$plugin" "$((SECONDS - _build_t0))"
             continue
         fi
 
@@ -272,10 +279,156 @@ snapshot_walk_chain() {
             snapshot_walk_vm_stop "$vm"
             snapshot_save "$vm" "$plugin" "$key" "cold" "$parent_plugin" "$parent_key"
         fi
+        snapshot_stats_record_miss "$plugin" "$((SECONDS - _build_t0))"
 
         parent_plugin="$plugin"; parent_key="$key"
         parent_path=$(snapshot_cache_path "$plugin" "$key")
     done
+}
+
+# --- Per-plugin snapshot analytics --------------------------------------
+#
+# stats.json schema (one file per plugin under $RL_CACHE_DIR/<plugin>/):
+#   {
+#     "plugin":                "<name>",
+#     "first_seen":            "<ISO8601>",
+#     "last_seen":             "<ISO8601>",
+#     "hits":                  <int>,
+#     "misses":                <int>,
+#     "rebuild_seconds_total": <int>,
+#     "rebuild_seconds_last":  <int>,
+#     "last_outcome":          "hit" | "miss"
+#   }
+# Updated by snapshot_walk_chain on every iteration. Read by
+# snapshot_stats_show (surfaced via `rl cache stats`).
+#
+# Plain bash read/write (no jq dep) to keep the runtime requirements
+# minimal. Concurrent rl new on the same project isn't supported; one
+# session at a time per cache dir.
+
+_snapshot_stats_path() {
+    local plugin="$1"
+    echo "$RL_CACHE_DIR/$plugin/stats.json"
+}
+
+_snapshot_stats_read_int() {
+    local file="$1" key="$2"
+    [[ -f "$file" ]] || { echo 0; return 0; }
+    local v
+    v=$(grep -E "\"$key\":" "$file" 2>/dev/null \
+        | sed -E 's/.*"'"$key"'": ([0-9]+).*/\1/' | head -1)
+    echo "${v:-0}"
+}
+
+_snapshot_stats_read_str() {
+    local file="$1" key="$2"
+    [[ -f "$file" ]] || { echo ""; return 0; }
+    local v
+    v=$(grep -E "\"$key\":" "$file" 2>/dev/null \
+        | sed -E 's/.*"'"$key"'": "([^"]*)".*/\1/' | head -1)
+    echo "$v"
+}
+
+_snapshot_stats_write() {
+    local plugin="$1" hits="$2" misses="$3" total_s="$4" last_s="$5" \
+          outcome="$6" first="$7" last="$8"
+    local dir="$RL_CACHE_DIR/$plugin"
+    mkdir -p "$dir"
+    local tmp="$dir/stats.json.tmp"
+    cat > "$tmp" <<JSON
+{
+  "plugin": "$plugin",
+  "first_seen": "$first",
+  "last_seen": "$last",
+  "hits": $hits,
+  "misses": $misses,
+  "rebuild_seconds_total": $total_s,
+  "rebuild_seconds_last": $last_s,
+  "last_outcome": "$outcome"
+}
+JSON
+    mv "$tmp" "$dir/stats.json"
+}
+
+# Bump hits + last_seen + last_outcome.
+snapshot_stats_record_hit() {
+    local plugin="$1"
+    local file
+    file=$(_snapshot_stats_path "$plugin")
+    local now
+    now=$(date -u +%FT%TZ)
+    local hits misses total last first
+    hits=$(_snapshot_stats_read_int "$file" hits)
+    misses=$(_snapshot_stats_read_int "$file" misses)
+    total=$(_snapshot_stats_read_int "$file" rebuild_seconds_total)
+    last=$(_snapshot_stats_read_int "$file" rebuild_seconds_last)
+    first=$(_snapshot_stats_read_str "$file" first_seen)
+    [[ -z "$first" ]] && first="$now"
+    hits=$((hits + 1))
+    _snapshot_stats_write "$plugin" "$hits" "$misses" "$total" "$last" \
+        "hit" "$first" "$now"
+}
+
+# Bump misses + add to total/last duration + last_seen + last_outcome.
+snapshot_stats_record_miss() {
+    local plugin="$1" duration_s="$2"
+    local file
+    file=$(_snapshot_stats_path "$plugin")
+    local now
+    now=$(date -u +%FT%TZ)
+    local hits misses total first
+    hits=$(_snapshot_stats_read_int "$file" hits)
+    misses=$(_snapshot_stats_read_int "$file" misses)
+    total=$(_snapshot_stats_read_int "$file" rebuild_seconds_total)
+    first=$(_snapshot_stats_read_str "$file" first_seen)
+    [[ -z "$first" ]] && first="$now"
+    misses=$((misses + 1))
+    total=$((total + duration_s))
+    _snapshot_stats_write "$plugin" "$hits" "$misses" "$total" "$duration_s" \
+        "miss" "$first" "$now"
+}
+
+# Pretty-print a per-plugin table to stdout. Used by `rl cache stats`.
+snapshot_stats_show() {
+    local cache_dir="${RL_CACHE_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/aq/cache}"
+    if [[ ! -d "$cache_dir" ]]; then
+        echo "No cache data yet (cache dir: $cache_dir)."
+        return 0
+    fi
+
+    local found=0 stats plugin hits misses total last_outcome last_seen avg ratio denom
+    local fmt='%-22s %6s %6s %10s %10s %8s   %s\n'
+    while IFS= read -r stats; do
+        if [[ "$found" -eq 0 ]]; then
+            printf "$fmt" PLUGIN HITS MISSES "HIT RATE" "AVG BUILD" LAST "LAST SEEN"
+            printf "$fmt" "----------------------" "------" "------" \
+                "----------" "----------" "--------" "-------------------"
+            found=1
+        fi
+        plugin=$(_snapshot_stats_read_str "$stats" plugin)
+        hits=$(_snapshot_stats_read_int "$stats" hits)
+        misses=$(_snapshot_stats_read_int "$stats" misses)
+        total=$(_snapshot_stats_read_int "$stats" rebuild_seconds_total)
+        last_outcome=$(_snapshot_stats_read_str "$stats" last_outcome)
+        last_seen=$(_snapshot_stats_read_str "$stats" last_seen)
+        denom=$((hits + misses))
+        if [[ "$denom" -eq 0 ]]; then
+            ratio="-"
+        else
+            ratio="$((hits * 100 / denom))%"
+        fi
+        if [[ "$misses" -eq 0 ]]; then
+            avg="-"
+        else
+            avg="$((total / misses))s"
+        fi
+        printf "$fmt" "$plugin" "$hits" "$misses" "$ratio" "$avg" \
+            "$last_outcome" "$last_seen"
+    done < <(find "$cache_dir" -maxdepth 2 -name stats.json -type f 2>/dev/null | sort)
+
+    if [[ "$found" -eq 0 ]]; then
+        echo "No stats recorded yet."
+    fi
 }
 
 # Remove cached snapshots that are stale.

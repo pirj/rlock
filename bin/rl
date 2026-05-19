@@ -22,6 +22,7 @@ Commands:
   rm                 Destroy the airlock VM
   status             Show airlock status
   ssh                SSH into the VM
+  cache <sub>        Inspect the snapshot layer cache (sub: stats)
   help               Show this help
 
 Plugins are activated during 'rl new'. Additional commands
@@ -324,12 +325,33 @@ cmd_ssh() {
     do_ssh "$vm_name"
 }
 
+# rl cache stats   — per-plugin hit/miss/rebuild-time table.
+# Future: rl cache ls, rl cache rm <plugin>[:<key>] (today live in
+# bakeri.sh's bake-cache; framework command exists only for the
+# analytics surface).
+cmd_cache() {
+    local sub="${1:-stats}"
+    case "$sub" in
+        stats) snapshot_stats_show ;;
+        ""|help|-h|--help)
+            cat <<'EOF'
+Usage: rl cache <subcommand>
+
+Subcommands:
+  stats     Per-plugin hits / misses / hit rate / avg rebuild time.
+EOF
+            ;;
+        *) die "Unknown subcommand: rl cache $sub" ;;
+    esac
+}
+
 # Main dispatch
 case "${1:-help}" in
     new)    shift; cmd_new "$@" ;;
     rm)     cmd_rm ;;
     status) cmd_status ;;
     ssh)    cmd_ssh ;;
+    cache)  shift; cmd_cache "$@" ;;
     help|--help|-h) cmd_help ;;
     *)
         # Try plugin command dispatch.

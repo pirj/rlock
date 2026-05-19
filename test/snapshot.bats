@@ -420,7 +420,7 @@ SH
     [ -f "$RL_CACHE_DIR/p3/new-key/disk.qcow2" ]
 }
 
-@test "snapshot_walk_chain ephemeral: runs build but does not save" {
+@test "snapshot_walk_chain ephemeral: runs build but does not save a snapshot disk" {
     source "$LIB_DIR/plugin.sh"
     _setup_fake_plugin "p4" "ephemeral" "k4"
 
@@ -434,7 +434,10 @@ SH
     : > "$BATS_TEST_TMPDIR/built.log"
     snapshot_walk_chain "fakevm" "p4"
     grep -q "BUILT:p4" "$BATS_TEST_TMPDIR/built.log"
-    [ ! -d "$RL_CACHE_DIR/p4" ]
+    # Ephemeral writes no disk.qcow2 / memory.bin. stats.json may exist
+    # (every iteration is recorded as a miss for analytics).
+    [ ! -f "$RL_CACHE_DIR/p4/disk.qcow2" ]
+    [ ! -f "$RL_CACHE_DIR/p4/memory.bin" ]
 }
 
 @test "snapshot_prune removes entries older than threshold + not in live set" {
@@ -451,6 +454,106 @@ SH
     [ ! -f "$RL_CACHE_DIR/foo/k_old/disk.qcow2" ]
     [ -f "$RL_CACHE_DIR/foo/k_recent/disk.qcow2" ]
     [ -f "$RL_CACHE_DIR/foo/k_live/disk.qcow2" ]
+}
+
+@test "snapshot_stats_record_hit creates stats.json with hits=1 when absent" {
+    snapshot_stats_record_hit "myplug"
+    [ -f "$RL_CACHE_DIR/myplug/stats.json" ]
+    run grep -E '"hits": 1' "$RL_CACHE_DIR/myplug/stats.json"
+    assert_success
+    run grep -E '"misses": 0' "$RL_CACHE_DIR/myplug/stats.json"
+    assert_success
+    run grep -E '"last_outcome": "hit"' "$RL_CACHE_DIR/myplug/stats.json"
+    assert_success
+}
+
+@test "snapshot_stats_record_hit increments hits on existing stats" {
+    snapshot_stats_record_hit "myplug"
+    snapshot_stats_record_hit "myplug"
+    snapshot_stats_record_hit "myplug"
+    run grep -E '"hits": 3' "$RL_CACHE_DIR/myplug/stats.json"
+    assert_success
+}
+
+@test "snapshot_stats_record_miss bumps misses and adds to total duration" {
+    snapshot_stats_record_miss "myplug" 12
+    snapshot_stats_record_miss "myplug" 30
+    run grep -E '"misses": 2' "$RL_CACHE_DIR/myplug/stats.json"
+    assert_success
+    run grep -E '"rebuild_seconds_total": 42' "$RL_CACHE_DIR/myplug/stats.json"
+    assert_success
+    run grep -E '"rebuild_seconds_last": 30' "$RL_CACHE_DIR/myplug/stats.json"
+    assert_success
+    run grep -E '"last_outcome": "miss"' "$RL_CACHE_DIR/myplug/stats.json"
+    assert_success
+}
+
+@test "snapshot_stats_show prints a table with per-plugin metrics" {
+    snapshot_stats_record_hit  "plug-a"
+    snapshot_stats_record_hit  "plug-a"
+    snapshot_stats_record_miss "plug-a" 8
+    snapshot_stats_record_miss "plug-b" 60
+
+    run snapshot_stats_show
+    assert_success
+    assert_output --partial "PLUGIN"
+    assert_output --partial "HIT RATE"
+    assert_output --partial "plug-a"
+    assert_output --partial "plug-b"
+    # plug-a: 2 hits + 1 miss = 66% (integer division 200/3=66)
+    assert_output --partial "66%"
+    # plug-b: 0 hits + 1 miss = 0%
+    assert_output --partial "0%"
+    # plug-a avg = 8s (one miss, total 8)
+    assert_output --partial "8s"
+    # plug-b avg = 60s
+    assert_output --partial "60s"
+}
+
+@test "snapshot_stats_show prints empty-state message when no stats" {
+    run snapshot_stats_show
+    assert_success
+    assert_output --partial "No stats recorded"
+}
+
+@test "snapshot_walk_chain on cache hit records a hit in stats" {
+    source "$LIB_DIR/plugin.sh"
+    _setup_fake_plugin "p-stats-hit" "cached" "k1"
+    mkdir -p "$RL_CACHE_DIR/p-stats-hit/k1"
+    qemu-img create -f qcow2 "$RL_CACHE_DIR/p-stats-hit/k1/disk.qcow2" 1M >/dev/null
+
+    snapshot_walk_vm_boot()   { :; }
+    snapshot_walk_vm_stop()   { :; }
+    snapshot_walk_vm_disk()   { echo "$BATS_TEST_TMPDIR/fake.qcow2"; }
+    snapshot_walk_vm_rebase() { :; }
+
+    run snapshot_walk_chain "fakevm" "p-stats-hit"
+    assert_success
+    run grep -E '"hits": 1' "$RL_CACHE_DIR/p-stats-hit/stats.json"
+    assert_success
+    run grep -E '"misses": 0' "$RL_CACHE_DIR/p-stats-hit/stats.json"
+    assert_success
+}
+
+@test "snapshot_walk_chain on cache miss records a miss in stats" {
+    source "$LIB_DIR/plugin.sh"
+    _setup_fake_plugin "p-stats-miss" "cached" "k1"
+
+    local fakedisk="$BATS_TEST_TMPDIR/disk.qcow2"
+    qemu-img create -f qcow2 "$fakedisk" 1M >/dev/null
+    snapshot_walk_vm_boot()   { :; }
+    snapshot_walk_vm_stop()   { :; }
+    snapshot_walk_vm_disk()   { echo "$fakedisk"; }
+    snapshot_walk_vm_rebase() { :; }
+
+    run snapshot_walk_chain "fakevm" "p-stats-miss"
+    assert_success
+    run grep -E '"hits": 0' "$RL_CACHE_DIR/p-stats-miss/stats.json"
+    assert_success
+    run grep -E '"misses": 1' "$RL_CACHE_DIR/p-stats-miss/stats.json"
+    assert_success
+    run grep -E '"last_outcome": "miss"' "$RL_CACHE_DIR/p-stats-miss/stats.json"
+    assert_success
 }
 
 @test "snapshot_prune drops memory.bin alongside disk.qcow2 for live entries" {
