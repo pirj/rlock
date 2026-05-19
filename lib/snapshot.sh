@@ -65,6 +65,13 @@ snapshot_save() {
     local dir="$RL_CACHE_DIR/$plugin/$key"
     mkdir -p "$dir"
 
+    # Overwrite-safe: remove any prior artifacts at this slot so the new
+    # save fully replaces them. Important for `rl warm rebuild`, which
+    # promotes the running VM into an existing cache entry (potentially
+    # changing kind cold→live or vice versa — the stale memory.bin from
+    # a previous live capture would mislead rebase if left in place).
+    rm -f "$dir/disk.qcow2" "$dir/memory.bin" "$dir/meta.json"
+
     case "$kind" in
         cold)
             local src_disk

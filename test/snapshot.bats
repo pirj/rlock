@@ -125,6 +125,41 @@ M
     assert_failure
 }
 
+@test "snapshot_save overwrites prior cold entry at the same slot" {
+    local src="$BATS_TEST_TMPDIR/src.qcow2"
+    qemu-img create -f qcow2 "$src" 1M >/dev/null
+    snapshot_walk_vm_disk() { echo "$src"; }
+    export -f snapshot_walk_vm_disk
+
+    snapshot_save "fakevm" "demo" "k" "cold" "" ""
+    local before_inode
+    before_inode=$(stat -f %i "$RL_CACHE_DIR/demo/k/disk.qcow2" 2>/dev/null \
+                   || stat -c %i "$RL_CACHE_DIR/demo/k/disk.qcow2")
+    snapshot_save "fakevm" "demo" "k" "cold" "" ""
+    local after_inode
+    after_inode=$(stat -f %i "$RL_CACHE_DIR/demo/k/disk.qcow2" 2>/dev/null \
+                  || stat -c %i "$RL_CACHE_DIR/demo/k/disk.qcow2")
+    # The previous file was rm'd before convert wrote a new one — fresh inode.
+    [ "$before_inode" != "$after_inode" ]
+}
+
+@test "snapshot_save cold overwrite drops stale memory.bin from a prior live entry" {
+    local src="$BATS_TEST_TMPDIR/src.qcow2"
+    qemu-img create -f qcow2 "$src" 1M >/dev/null
+    snapshot_walk_vm_disk() { echo "$src"; }
+    export -f snapshot_walk_vm_disk
+
+    # Simulate a prior live capture at the same slot.
+    mkdir -p "$RL_CACHE_DIR/demo/k"
+    touch "$RL_CACHE_DIR/demo/k/disk.qcow2" "$RL_CACHE_DIR/demo/k/memory.bin"
+
+    snapshot_save "fakevm" "demo" "k" "cold" "" ""
+    [ -f "$RL_CACHE_DIR/demo/k/disk.qcow2" ]
+    [ ! -f "$RL_CACHE_DIR/demo/k/memory.bin" ]
+    run jq -r '.kind' "$RL_CACHE_DIR/demo/k/meta.json"
+    assert_output "cold"
+}
+
 @test "snapshot_rebase creates qcow2 with given backing" {
     local backing="$BATS_TEST_TMPDIR/backing.qcow2"
     qemu-img create -f qcow2 "$backing" 1M >/dev/null

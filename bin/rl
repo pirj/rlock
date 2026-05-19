@@ -22,6 +22,7 @@ Commands:
   rm                 Destroy the airlock VM
   status             Show airlock status
   ssh                SSH into the VM
+  warm <sub>         Manage the warm snapshot (sub: rebuild)
   cache <sub>        Inspect the snapshot layer cache (sub: stats)
   help               Show this help
 
@@ -259,6 +260,80 @@ cmd_ssh() {
     do_ssh "$vm_name"
 }
 
+# Promote the running VM's current state into the topmost cached
+# snapshot layer. Solves the out-of-band-Docker-state problem: state
+# the user accumulated during an `rl ssh` session (docker pull,
+# docker volume create, ...) lives only on the VM's storage.qcow2 and
+# would be lost on next `rl new`. `rl warm rebuild` overwrites the
+# cache entry for the topmost [snapshot] plugin's current key with the
+# captured VM state — next cold restore picks the mutations up.
+cmd_warm_rebuild() {
+    local vm_name
+    vm_name=$(resolve_vm_name) || die "No airlock found in this directory."
+    is_vm_running "$vm_name" \
+        || die "VM is not running. Start it with 'rl ssh' or boot via 'rl new' first."
+
+    local -a plugins
+    mapfile -t plugins < <(get_active_plugins)
+
+    # Walk plugins in reverse to find the topmost one with [snapshot].
+    # That's the slot whose cached qcow2 the VM is rebased onto, so
+    # promoting current VM state into it preserves chain semantics.
+    local topmost="" plugin i
+    for ((i=${#plugins[@]}-1; i>=0; i--)); do
+        plugin="${plugins[$i]}"
+        [[ -n "$plugin" ]] || continue
+        if plugin_has_snapshot "$plugin"; then
+            topmost="$plugin"
+            break
+        fi
+    done
+    [[ -n "$topmost" ]] \
+        || die "No plugin with [snapshot] in active chain — nothing to promote."
+
+    local strategy kind key
+    strategy=$(plugin_snapshot_strategy "$topmost")
+    [[ "$strategy" != "ephemeral" ]] \
+        || die "Topmost layer '$topmost' is ephemeral — its cache slot does not persist."
+
+    kind=$(plugin_snapshot_kind "$topmost")
+    key=$(run_hook "$topmost" "snapshot_key")
+    [[ -n "$key" ]] \
+        || die "Plugin '$topmost' did not emit a snapshot_key — cannot locate its cache slot."
+
+    spinner_start "Promoting VM state into '$topmost' cache"
+    if [[ "$kind" == "cold" ]]; then
+        snapshot_walk_vm_stop "$vm_name"
+        snapshot_save "$vm_name" "$topmost" "$key" "cold"
+        aq start "$vm_name" >/dev/null
+        wait_for_ssh "$vm_name" 60 >/dev/null
+    else
+        snapshot_save "$vm_name" "$topmost" "$key" "live"
+    fi
+    spinner_stop "Promoted '$topmost' ($kind)"
+    success "Next 'rl new' on this project will restore from the updated cache."
+}
+
+cmd_warm() {
+    local sub="${1:-}"
+    case "$sub" in
+        rebuild) cmd_warm_rebuild ;;
+        ""|help|-h|--help)
+            cat <<'EOF'
+Usage: rl warm <subcommand>
+
+Subcommands:
+  rebuild   Promote the running VM's current state into the topmost
+            cached snapshot layer. Use after installing software,
+            pulling images, or creating volumes that the plugin chain
+            doesn't capture — those mutations would otherwise be lost
+            on the next 'rl new'.
+EOF
+            ;;
+        *) die "Unknown subcommand: rl warm $sub" ;;
+    esac
+}
+
 # rl cache stats   — per-plugin hit/miss/rebuild-time table.
 # Future: rl cache ls, rl cache rm <plugin>[:<key>] (today live in
 # bakeri.sh's bake-cache; framework command exists only for the
@@ -285,6 +360,7 @@ case "${1:-help}" in
     rm)     cmd_rm ;;
     status) cmd_status ;;
     ssh)    cmd_ssh ;;
+    warm)   shift; cmd_warm "$@" ;;
     cache)  shift; cmd_cache "$@" ;;
     help|--help|-h) cmd_help ;;
     *)
