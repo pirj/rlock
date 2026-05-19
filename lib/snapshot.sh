@@ -70,7 +70,7 @@ snapshot_save() {
     # promotes the running VM into an existing cache entry (potentially
     # changing kind cold→live or vice versa — the stale memory.bin from
     # a previous live capture would mislead rebase if left in place).
-    rm -f "$dir/disk.qcow2" "$dir/memory.bin" "$dir/meta.json"
+    rm -f "$dir/disk.qcow2" "$dir/memory.bin" "$dir/memory.bin.zst" "$dir/meta.json"
 
     case "$kind" in
         cold)
@@ -80,15 +80,22 @@ snapshot_save() {
             ;;
         live)
             # aq snapshot create captures memory + disk while VM is running,
-            # writing to ~/.local/share/aq/snapshots/<arch>/<tag>/{disk.qcow2,memory.bin}.
-            # We use a unique internal tag, then move the files into the
-            # framework cache and clean up the tag.
+            # writing to ~/.local/share/aq/snapshots/<arch>/<tag>/{disk.qcow2,
+            # memory.bin[.zst]}. We use a unique internal tag, then move
+            # the files into the framework cache and clean up the tag.
+            # aq compresses memory.bin to memory.bin.zst when zstd is on
+            # the host; whichever form aq produced we move as-is — both
+            # are recognised by snapshot_walk_vm_rebase on restore.
             local tag="__rl_cache_${plugin}_${key:0:32}_$$"
             aq snapshot create "$vm" "$tag" >/dev/null
             local aq_dir
             aq_dir=$(snapshot_aq_tag_dir "$tag")
             mv "$aq_dir/disk.qcow2" "$dir/disk.qcow2"
-            mv "$aq_dir/memory.bin" "$dir/memory.bin"
+            if [[ -f "$aq_dir/memory.bin.zst" ]]; then
+                mv "$aq_dir/memory.bin.zst" "$dir/memory.bin.zst"
+            elif [[ -f "$aq_dir/memory.bin" ]]; then
+                mv "$aq_dir/memory.bin" "$dir/memory.bin"
+            fi
             aq snapshot rm --force "$tag" >/dev/null 2>&1 || true
             ;;
         *)
@@ -172,12 +179,16 @@ snapshot_walk_vm_rebase() {
     kind=$(snapshot_entry_kind "$backing")
     if [[ "$kind" == "live" ]]; then
         cache_dir=$(dirname "$backing")
-        rm -f "$vm_dir/incoming-memory.bin"
-        if [[ -f "$cache_dir/memory.bin" ]]; then
+        # Always clear BOTH forms so a previous layer's incoming doesn't
+        # bleed through. aq's start path picks whichever form is staged.
+        rm -f "$vm_dir/incoming-memory.bin" "$vm_dir/incoming-memory.bin.zst"
+        if [[ -f "$cache_dir/memory.bin.zst" ]]; then
+            cp "$cache_dir/memory.bin.zst" "$vm_dir/incoming-memory.bin.zst"
+        elif [[ -f "$cache_dir/memory.bin" ]]; then
             cp "$cache_dir/memory.bin" "$vm_dir/incoming-memory.bin"
         fi
     fi
-    # kind=cold: leave any existing incoming-memory.bin in place.
+    # kind=cold: leave any existing incoming-memory.bin / .zst in place.
 }
 
 # Walk the layer chain for an ordered plugin list.
@@ -204,12 +215,13 @@ snapshot_walk_chain() {
     # Each iteration may rebase the VM disk; the VM must be stopped first.
     snapshot_walk_vm_stop "$vm"
 
-    # Clear any stale incoming-memory.bin from a prior `rl new` session.
-    # Subsequent rebases will only re-create it when restoring a live
-    # cache hit (snapshot_walk_vm_rebase handles the per-layer policy).
+    # Clear any stale incoming-memory.bin[.zst] from a prior `rl new`
+    # session. Subsequent rebases will only re-create one when restoring
+    # a live cache hit (snapshot_walk_vm_rebase handles the per-layer
+    # policy and picks the .zst form when present).
     local _vm_dir
     _vm_dir=$(dirname "$(snapshot_walk_vm_disk "$vm")")
-    rm -f "$_vm_dir/incoming-memory.bin"
+    rm -f "$_vm_dir/incoming-memory.bin" "$_vm_dir/incoming-memory.bin.zst"
 
     local plugin strategy kind key cache_path latest
     for plugin in "$@"; do
@@ -254,11 +266,11 @@ snapshot_walk_chain() {
         # For ephemeral: same — run on whatever the VM disk currently is.
 
         # We're about to boot the VM to run `snapshot_build` on top of the
-        # parent's disk state. An earlier live ancestor's memory.bin would
-        # cause `-incoming file:` to resume mid-flight; we don't want that
+        # parent's disk state. An earlier live ancestor's memory dump
+        # (.bin or .bin.zst) would resume mid-flight; we don't want that
         # during a build (the build expects a clean cold boot at the new
-        # disk content). Clear it for this iteration.
-        rm -f "$_vm_dir/incoming-memory.bin"
+        # disk content). Clear both forms for this iteration.
+        rm -f "$_vm_dir/incoming-memory.bin" "$_vm_dir/incoming-memory.bin.zst"
 
         # Time the miss-path build for snapshot_stats. SECONDS is a bash
         # builtin counting whole seconds since shell start — second-level
@@ -469,15 +481,19 @@ snapshot_prune() {
             continue
         fi
 
-        local size mem mem_size
+        local size mem mem_zst mem_size
         size=$(stat -f%z "$snap" 2>/dev/null || stat -c%s "$snap" 2>/dev/null || echo 0)
-        # If this is a live entry, also drop memory.bin (much bigger than disk).
+        # If this is a live entry, also drop memory.bin / memory.bin.zst
+        # (much bigger than disk).
         mem="$(dirname "$snap")/memory.bin"
-        if [[ -f "$mem" ]]; then
-            mem_size=$(stat -f%z "$mem" 2>/dev/null || stat -c%s "$mem" 2>/dev/null || echo 0)
-            size=$((size + mem_size))
-            rm -f "$mem"
-        fi
+        mem_zst="$(dirname "$snap")/memory.bin.zst"
+        for f in "$mem" "$mem_zst"; do
+            if [[ -f "$f" ]]; then
+                mem_size=$(stat -f%z "$f" 2>/dev/null || stat -c%s "$f" 2>/dev/null || echo 0)
+                size=$((size + mem_size))
+                rm -f "$f"
+            fi
+        done
         rm -f "$snap" "$(dirname "$snap")/meta.json"
         rmdir "$(dirname "$snap")" 2>/dev/null || true
         removed=$((removed + 1))
