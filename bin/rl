@@ -118,10 +118,22 @@ cmd_new() {
         die "Airlock '$vm_name' already exists. Run 'rl rm' first."
     fi
 
+    # Compute the max RAM declared across active plugins (via the
+    # [snapshot] memory = "NG" field). Plugins that need more than aq's
+    # default 1G (notably docker-compose with kind = "live") declare
+    # their need; the framework collects the max and passes it as
+    # --memory=NG. Plugins that don't declare memory contribute nothing.
+    local -a aq_new_args=("--size=16G")
+    if [[ ${#resolved[@]} -gt 0 ]]; then
+        local _max_mem
+        _max_mem=$(max_snapshot_memory "${resolved[@]}")
+        if [[ -n "$_max_mem" ]]; then
+            aq_new_args+=("--memory=${_max_mem}G")
+        fi
+    fi
+
     spinner_start "Creating VM"
-    aq new "$vm_name"
-    # Resize disk to 16G — accommodates docker-in-VM (images + volumes + DB)
-    qemu-img resize "$AQ_STATE_DIR/$vm_name/storage.qcow2" 16G >/dev/null 2>&1 || true
+    aq new "${aq_new_args[@]}" "$vm_name"
     aq start "$vm_name"
     spinner_stop "VM created"
 

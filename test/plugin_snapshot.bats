@@ -72,6 +72,51 @@ _make_plugin() {
     assert_output --partial "unknown snapshot kind"
 }
 
+@test "plugin_snapshot_memory returns empty when not declared" {
+    _make_plugin "pm1" 'description = "P"' '[snapshot]' 'strategy = "cached"'
+    run plugin_snapshot_memory "pm1"
+    assert_success
+    [ -z "$output" ]
+}
+
+@test "plugin_snapshot_memory strips G suffix" {
+    _make_plugin "pm2" 'description = "P"' '[snapshot]' 'strategy = "cached"' 'memory = "4G"'
+    run plugin_snapshot_memory "pm2"
+    assert_success
+    assert_output "4"
+}
+
+@test "plugin_snapshot_memory accepts bare integer" {
+    _make_plugin "pm3" 'description = "P"' '[snapshot]' 'strategy = "cached"' 'memory = "8"'
+    run plugin_snapshot_memory "pm3"
+    assert_success
+    assert_output "8"
+}
+
+@test "plugin_snapshot_memory rejects non-integer" {
+    _make_plugin "pm4" 'description = "P"' '[snapshot]' 'strategy = "cached"' 'memory = "0"'
+    run plugin_snapshot_memory "pm4"
+    assert_failure
+    assert_output --partial "invalid snapshot.memory"
+}
+
+@test "max_snapshot_memory picks largest across plugins" {
+    _make_plugin "mm1" 'description = "A"' '[snapshot]' 'strategy = "cached"' 'memory = "2G"'
+    _make_plugin "mm2" 'description = "B"' '[snapshot]' 'strategy = "cached"' 'memory = "8G"'
+    _make_plugin "mm3" 'description = "C"' '[snapshot]' 'strategy = "cached"' 'memory = "4G"'
+    run max_snapshot_memory mm1 mm2 mm3
+    assert_success
+    assert_output "8"
+}
+
+@test "max_snapshot_memory returns empty when no plugin declares" {
+    _make_plugin "mm-none1" 'description = "A"' '[snapshot]' 'strategy = "cached"'
+    _make_plugin "mm-none2" 'description = "B"' '[snapshot]' 'strategy = "cached"'
+    run max_snapshot_memory mm-none1 mm-none2
+    assert_success
+    [ -z "$output" ]
+}
+
 @test "plugin_protocol_version returns declared version" {
     _make_plugin "p6" 'protocol_version = "1"' 'description = "P"'
     run plugin_protocol_version "p6"

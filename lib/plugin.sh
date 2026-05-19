@@ -72,6 +72,46 @@ plugin_snapshot_kind() {
     esac
 }
 
+# Print the memory requirement (in integer GB) declared by a plugin's
+# [snapshot] section, or empty if none. Memory is meaningful chiefly for
+# kind = "live" plugins (the snapshot binds RAM size) but a plugin can
+# declare it under kind = "cold" too to express a baseline need.
+# The framework collects values across active plugins and takes the max
+# to pass to `aq new --memory=NG`.
+plugin_snapshot_memory() {
+    local plugin="$1"
+    local pdir
+    pdir=$(plugin_dir "$plugin") || return 1
+    local m
+    m=$(toml_get_in_section "$pdir/plugin.toml" "snapshot" "memory")
+    # Strip an optional trailing G/g so "4G" / "4g" / "4" all yield "4".
+    m="${m%[Gg]}"
+    if [[ -n "$m" ]]; then
+        if ! [[ "$m" =~ ^[1-9][0-9]*$ ]]; then
+            echo "Plugin '$plugin' declares invalid snapshot.memory '$m' (expected positive integer)" >&2
+            return 1
+        fi
+        echo "$m"
+    fi
+}
+
+# Compute the maximum memory (integer GB) declared across the given
+# plugin list. Prints the max, or nothing if no plugin declares memory.
+# Usage: max_snapshot_memory plugin1 plugin2 ...
+max_snapshot_memory() {
+    local max=""
+    local p m
+    for p in "$@"; do
+        m=$(plugin_snapshot_memory "$p" 2>/dev/null) || continue
+        [[ -n "$m" ]] || continue
+        if [[ -z "$max" || "$m" -gt "$max" ]]; then
+            max="$m"
+        fi
+    done
+    [[ -n "$max" ]] && echo "$max"
+    return 0
+}
+
 # Discover all available plugins.
 # Prints plugin names (one per line), sorted alphabetically.
 discover_plugins() {
