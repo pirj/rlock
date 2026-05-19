@@ -43,13 +43,7 @@ Per-ecosystem snapshot layer order is driven by change frequency.
  - Make order configurable per project? Or auto-reorder based on observed lockfile churn?
  - Revisit once we have real usage data.
 
-Snapshot analytics.
- - Track per-plugin cache hit rate, rebuild count, avg rebuild duration, snapshot disk usage.
- - Persist in ~/.local/share/aq/cache/<plugin>/stats.json.
- - Surface via `rl cache stats` command.
- - Goal: identify plugins whose cache is rarely hit → recommend downgrade from `cached`/`incremental` to `ephemeral`.
- - Identify plugins with rebuilds so frequent that snapshotting costs more than it saves.
- - Inform per-ecosystem ordering decisions (top-of-chain = most volatile).
+[done 2026-05-19, commit f6c912e] Snapshot analytics. Shipped as `rl cache stats`. Per-plugin stats.json under $RL_CACHE_DIR/<plugin>/stats.json, recorded by walk_chain on each iteration (hit / miss / duration). Ephemeral layers are recorded too (every iteration is a miss). Disk usage stays in bake-cache. Open: average duration is total/misses — no median yet; "disk usage per plugin" surfaced separately by `bake-cache`. Reconsider both if churn signals make them load-bearing.
 
 Subset-detection for snapshot keys.
  - Some plugins (e.g., rails-db-migrations when only new migrations are added) have additive-only key changes.
