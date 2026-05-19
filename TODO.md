@@ -125,6 +125,31 @@ Out-of-band Docker state persistence — `rl warm rebuild` command.
    live tweaks into the cached snapshot.
  - From specs/2026-05-11-layered-snapshots-design.md "Known limitations".
 
+Plugin protocol v2: "command-only plugin" semantic.
+
+Today, a plugin that exists purely to host CLI commands (no [snapshot]
+section, no provisioning hooks) must still declare `triggers = [...]`
+to appear in ACTIVE_PLUGINS, so the framework's `dispatch_command` can
+find it. The workaround is to mirror the distribution's union of
+triggers in every command-only plugin — see bakeri.sh's bake-run /
+bake-pr / bake-cache duplication. The 2026-05-19 architecture review
+(Issue 3) calls this out as the kind of change that would justify
+protocol_version = 2.
+
+Candidate semantics:
+
+  (a) `[plugin] always_active_for_dist = true` — auto-activate whenever
+      ANY other plugin in the same distribution activates. Requires a
+      distribution-membership concept the protocol currently lacks.
+  (b) Dispatch from all DISCOVERABLE plugins, not just active ones.
+      Risky for commands that assume their plugin's snapshot layer is
+      built; safe for pure-CLI commands.
+
+Either path means bumping `protocol_version` so old plugins that don't
+declare new fields still work. Defer until we have a second reason to
+bump (e.g. a needed change to the [snapshot] schema) so a single v2
+bump batches multiple improvements.
+
 Cross-machine snapshot transport.
  - Cached snapshots are host-local under ~/.local/share/aq/cache/. For CI
    fleets and team setups, sharing the cache across machines is
