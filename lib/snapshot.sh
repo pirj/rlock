@@ -223,6 +223,20 @@ snapshot_walk_chain() {
     _vm_dir=$(dirname "$(snapshot_walk_vm_disk "$vm")")
     rm -f "$_vm_dir/incoming-memory.bin" "$_vm_dir/incoming-memory.bin.zst"
 
+    # Coalesce consecutive cache-hit rebases. Each cached snapshot is a
+    # standalone qcow2 (saved via `qemu-img convert` without `-B`), so a
+    # rebase to layer N has all of L1…N's content baked in regardless of
+    # whether we rebased to the intermediate layers first. For warm paths
+    # with N=4 cache hits, this collapses 4 rebases + 4 memory-dump
+    # potential cps into 1 — measurable on the rails-pg-sample fixture
+    # (saved ~0.5 s per intermediate hit, plus avoids unnecessary
+    # memory.bin.zst staging on non-tail live layers).
+    #
+    # The pending rebase is flushed before any miss (cached/incremental/
+    # ephemeral all need storage.qcow2 to be on the actual parent's qcow2
+    # before the build runs) and at the chain end.
+    local pending_path=""
+
     local plugin strategy kind key cache_path latest
     for plugin in "$@"; do
         plugin_has_snapshot "$plugin" || continue
@@ -247,10 +261,21 @@ snapshot_walk_chain() {
 
         # Cache hit (cached + incremental only)
         if [[ "$strategy" != "ephemeral" ]] && cache_path=$(snapshot_lookup "$plugin" "$key"); then
-            snapshot_walk_vm_rebase "$vm" "$cache_path"
+            # Defer the rebase — a subsequent consecutive hit will replace
+            # this pending path; only the final hit (or pre-miss flush)
+            # actually materialises in qemu-img + memory-dump cp work.
             snapshot_stats_record_hit "$plugin"
+            pending_path="$cache_path"
             parent_plugin="$plugin"; parent_key="$key"; parent_path="$cache_path"
             continue
+        fi
+
+        # Miss path begins. Materialise any deferred cache-hit rebase
+        # first so storage.qcow2's backing is the actual chain parent
+        # before the build runs.
+        if [[ -n "$pending_path" ]]; then
+            snapshot_walk_vm_rebase "$vm" "$pending_path"
+            pending_path=""
         fi
 
         # Miss: pick the right backing for the build
@@ -303,6 +328,14 @@ snapshot_walk_chain() {
         parent_plugin="$plugin"; parent_key="$key"
         parent_path=$(snapshot_cache_path "$plugin" "$key")
     done
+
+    # Tail flush: warm paths where the last operation was a cache hit
+    # haven't materialised their final rebase yet. This is the operation
+    # that lands the kind=live tail's memory.bin[.zst] in the VM dir as
+    # incoming-memory.bin[.zst] for the post-walk `aq start` to pick up.
+    if [[ -n "$pending_path" ]]; then
+        snapshot_walk_vm_rebase "$vm" "$pending_path"
+    fi
 }
 
 # --- Per-plugin snapshot analytics --------------------------------------

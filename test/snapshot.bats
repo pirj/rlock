@@ -475,6 +475,70 @@ SH
     [ ! -f "$RL_CACHE_DIR/p4/memory.bin" ]
 }
 
+@test "snapshot_walk_chain coalesces consecutive cache hits into one rebase" {
+    # Three plugins all cache-hit. Pre-v2 the loop rebased N times;
+    # post-v2 it defers each hit's rebase and only materialises the last
+    # one. snapshot_walk_vm_rebase is stubbed as a counter.
+    source "$LIB_DIR/plugin.sh"
+    _setup_fake_plugin "h1" "cached" "k1"
+    _setup_fake_plugin "h2" "cached" "k2"
+    _setup_fake_plugin "h3" "cached" "k3"
+    for p in h1 h2 h3; do
+        mkdir -p "$RL_CACHE_DIR/$p/k${p#h}"
+        qemu-img create -f qcow2 "$RL_CACHE_DIR/$p/k${p#h}/disk.qcow2" 1M >/dev/null
+    done
+
+    snapshot_walk_vm_boot()   { :; }
+    snapshot_walk_vm_stop()   { :; }
+    snapshot_walk_vm_disk()   { echo "$BATS_TEST_TMPDIR/fake.qcow2"; }
+    snapshot_walk_vm_rebase() {
+        echo "rebase:$2" >> "$BATS_TEST_TMPDIR/rebase.log"
+    }
+
+    : > "$BATS_TEST_TMPDIR/rebase.log"
+    : > "$BATS_TEST_TMPDIR/built.log"
+    run snapshot_walk_chain "fakevm" h1 h2 h3
+    assert_success
+    # All three should record hits in stats.
+    for p in h1 h2 h3; do
+        run grep -E '"hits": 1' "$RL_CACHE_DIR/$p/stats.json"
+        assert_success
+    done
+    # But only ONE rebase actually happens — to h3's cache.
+    [ "$(wc -l < "$BATS_TEST_TMPDIR/rebase.log")" -eq 1 ]
+    grep -q "rebase:$RL_CACHE_DIR/h3/k3/disk.qcow2" "$BATS_TEST_TMPDIR/rebase.log"
+}
+
+@test "snapshot_walk_chain flushes pending hit before a miss-build" {
+    # Pattern: cache hit, then cache miss. The hit's rebase must
+    # materialise BEFORE the miss-build runs (so storage.qcow2 is on
+    # the chain parent), not be skipped.
+    source "$LIB_DIR/plugin.sh"
+    _setup_fake_plugin "h-pre"  "cached" "kpre"
+    _setup_fake_plugin "m-post" "cached" "kpost"
+    mkdir -p "$RL_CACHE_DIR/h-pre/kpre"
+    qemu-img create -f qcow2 "$RL_CACHE_DIR/h-pre/kpre/disk.qcow2" 1M >/dev/null
+    # m-post has no cache → miss.
+
+    local fakedisk="$BATS_TEST_TMPDIR/disk.qcow2"
+    qemu-img create -f qcow2 "$fakedisk" 1M >/dev/null
+    snapshot_walk_vm_boot()   { :; }
+    snapshot_walk_vm_stop()   { :; }
+    snapshot_walk_vm_disk()   { echo "$fakedisk"; }
+    snapshot_walk_vm_rebase() {
+        echo "rebase:$2" >> "$BATS_TEST_TMPDIR/rebase.log"
+    }
+
+    : > "$BATS_TEST_TMPDIR/rebase.log"
+    : > "$BATS_TEST_TMPDIR/built.log"
+    run snapshot_walk_chain "fakevm" "h-pre" "m-post"
+    assert_success
+    # h-pre's hit rebase fired (flushed before m-post's build).
+    grep -q "rebase:$RL_CACHE_DIR/h-pre/kpre/disk.qcow2" "$BATS_TEST_TMPDIR/rebase.log"
+    # m-post built.
+    grep -q "BUILT:m-post" "$BATS_TEST_TMPDIR/built.log"
+}
+
 @test "snapshot_prune removes entries older than threshold + not in live set" {
     mkdir -p "$RL_CACHE_DIR/foo/k_old" "$RL_CACHE_DIR/foo/k_recent" "$RL_CACHE_DIR/foo/k_live"
     qemu-img create -f qcow2 "$RL_CACHE_DIR/foo/k_old/disk.qcow2" 1M >/dev/null
