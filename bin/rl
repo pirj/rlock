@@ -118,29 +118,33 @@ cmd_new() {
 
     spinner_start "Creating VM"
     aq new "${aq_new_args[@]}" "$vm_name"
-    aq start "$vm_name"
     spinner_stop "VM created"
 
     save_vm_name "$vm_name"
 
-    spinner_start "Waiting for SSH"
-    if ! wait_for_ssh "$vm_name" 60; then
-        die "SSH connection timed out"
-    fi
-    spinner_stop "SSH ready"
-
-    # Walk the snapshot layer chain.
-    # `_base` is always prepended: it's the framework-internal layer that
-    # carries the apk-add / rlock-user / sshd-hardening provisioning shared
-    # across every rlock distribution. After the first cold rl new on a
-    # host, every subsequent cold (any distribution, any project) gets a
-    # cache hit on _base instead of re-paying ~30 s of base provisioning.
+    # Walk the snapshot layer chain. `_base` is always prepended: it's
+    # the framework-internal layer that carries the apk-add / rlock-user
+    # / sshd-hardening provisioning shared across every rlock
+    # distribution. After the first cold rl new on a host, every
+    # subsequent cold (any distribution, any project) gets a cache hit
+    # on `_base` instead of re-paying ~30 s of base provisioning.
+    #
+    # NB: we no longer `aq start` + `wait_for_ssh` before walk_chain.
+    # Walk_chain immediately stops the VM and rebases the disk anyway,
+    # so the pre-walk boot was ~4 s of pure waste on the warm path. On
+    # cold (first miss), walk_chain boots the VM itself via
+    # `snapshot_walk_vm_boot`; on warm (all cache hits), the VM stays
+    # stopped through the chain and the single post-walk `aq start`
+    # below either resumes via incoming-memory.bin (kind=live cache
+    # hit) or cold-boots the rebased disk.
     spinner_start "Walking snapshot layers"
     snapshot_walk_chain "$vm_name" "_base" "${resolved[@]}"
     spinner_stop "Layers ready"
-    # Boot the VM back up after the chain leaves it stopped.
+
+    spinner_start "Booting VM"
     aq start "$vm_name" >/dev/null
     wait_for_ssh "$vm_name" 60 >/dev/null
+    spinner_stop "VM ready"
 
     # Run provision hooks for plugins WITHOUT [snapshot] (legacy + side-effect-only)
     local plugin
