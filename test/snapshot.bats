@@ -194,6 +194,89 @@ M
     assert_output "NEW-LIVE-MEMORY"
 }
 
+@test "snapshot_walk_chain skips layer whose snapshot_should_skip prints skip" {
+    source "$LIB_DIR/plugin.sh"
+    # Plugin declares snapshot_should_skip that always prints "skip".
+    local name="p-skipper"
+    export PLUGIN_CORE_DIR="$BATS_TEST_TMPDIR/core"
+    export PLUGIN_USER_DIR="$BATS_TEST_TMPDIR/user"
+    mkdir -p "$PLUGIN_CORE_DIR/$name"
+    cat > "$PLUGIN_CORE_DIR/$name/plugin.toml" <<EOF
+description = "Skipping plugin"
+[snapshot]
+strategy = "cached"
+EOF
+    cat > "$PLUGIN_CORE_DIR/$name/plugin.sh" <<SH
+#!/usr/bin/env bash
+snapshot_should_skip() { echo "skip"; }
+snapshot_key()  { echo "should-not-be-called" >> "$BATS_TEST_TMPDIR/built.log"; }
+snapshot_build() { echo "should-not-be-called" >> "$BATS_TEST_TMPDIR/built.log"; }
+if declare -f "\$1" > /dev/null 2>&1; then "\$1" "\${@:2}"; fi
+SH
+    chmod +x "$PLUGIN_CORE_DIR/$name/plugin.sh"
+
+    snapshot_walk_vm_boot()   { echo "boot called" >> "$BATS_TEST_TMPDIR/built.log"; }
+    snapshot_walk_vm_stop()   { :; }
+    snapshot_walk_vm_disk()   { echo "$BATS_TEST_TMPDIR/fake.qcow2"; }
+    snapshot_walk_vm_rebase() { echo "rebase called" >> "$BATS_TEST_TMPDIR/built.log"; }
+
+    : > "$BATS_TEST_TMPDIR/built.log"
+    run snapshot_walk_chain "fakevm" "$name"
+    assert_success
+    [ ! -s "$BATS_TEST_TMPDIR/built.log" ]
+}
+
+@test "snapshot_walk_chain participates when snapshot_should_skip prints anything else" {
+    source "$LIB_DIR/plugin.sh"
+    # Plugin returns "go" (or empty) — should NOT skip.
+    local name="p-go"
+    export PLUGIN_CORE_DIR="$BATS_TEST_TMPDIR/core"
+    export PLUGIN_USER_DIR="$BATS_TEST_TMPDIR/user"
+    mkdir -p "$PLUGIN_CORE_DIR/$name"
+    cat > "$PLUGIN_CORE_DIR/$name/plugin.toml" <<EOF
+description = "Non-skipping plugin"
+[snapshot]
+strategy = "cached"
+EOF
+    cat > "$PLUGIN_CORE_DIR/$name/plugin.sh" <<SH
+#!/usr/bin/env bash
+snapshot_should_skip() { echo "go"; }
+snapshot_key()  { echo "kgo"; }
+snapshot_build() { echo "BUILT" >> "$BATS_TEST_TMPDIR/built.log"; }
+if declare -f "\$1" > /dev/null 2>&1; then "\$1" "\${@:2}"; fi
+SH
+    chmod +x "$PLUGIN_CORE_DIR/$name/plugin.sh"
+
+    local fakedisk="$BATS_TEST_TMPDIR/disk.qcow2"
+    qemu-img create -f qcow2 "$fakedisk" 1M >/dev/null
+    snapshot_walk_vm_boot()   { :; }
+    snapshot_walk_vm_stop()   { :; }
+    snapshot_walk_vm_disk()   { echo "$fakedisk"; }
+    snapshot_walk_vm_rebase() { :; }
+
+    : > "$BATS_TEST_TMPDIR/built.log"
+    run snapshot_walk_chain "fakevm" "$name"
+    assert_success
+    grep -q "BUILT" "$BATS_TEST_TMPDIR/built.log"
+}
+
+@test "snapshot_walk_chain participates when snapshot_should_skip is undefined" {
+    source "$LIB_DIR/plugin.sh"
+    _setup_fake_plugin "p-nohook" "cached" "kn"
+
+    local fakedisk="$BATS_TEST_TMPDIR/disk.qcow2"
+    qemu-img create -f qcow2 "$fakedisk" 1M >/dev/null
+    snapshot_walk_vm_boot()   { :; }
+    snapshot_walk_vm_stop()   { :; }
+    snapshot_walk_vm_disk()   { echo "$fakedisk"; }
+    snapshot_walk_vm_rebase() { :; }
+
+    : > "$BATS_TEST_TMPDIR/built.log"
+    run snapshot_walk_chain "fakevm" "p-nohook"
+    assert_success
+    grep -q "BUILT:p-nohook" "$BATS_TEST_TMPDIR/built.log"
+}
+
 @test "snapshot_walk_chain clears stale incoming-memory.bin at start" {
     # A leftover incoming-memory.bin from a previous `rl new` session
     # must be cleared before walking — otherwise it would be applied

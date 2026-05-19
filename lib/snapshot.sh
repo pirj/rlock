@@ -207,6 +207,21 @@ snapshot_walk_chain() {
     local plugin strategy kind key cache_path latest
     for plugin in "$@"; do
         plugin_has_snapshot "$plugin" || continue
+
+        # Per-iteration short-circuit. Plugins can declare a
+        # `snapshot_should_skip` hook that prints the literal string
+        # "skip" to signal "nothing to do for this project — don't
+        # participate in the chain". Saves the rebase + aq start +
+        # wait_for_ssh + aq stop cycle (~5-7 s) per no-op layer.
+        #
+        # Stdout-based signalling (not exit code) because the framework's
+        # plugin dispatch falls through to exit 0 when the hook isn't
+        # defined — an exit-code protocol would mistake "hook absent"
+        # for "skip".
+        if [[ "$(run_hook "$plugin" "snapshot_should_skip" 2>/dev/null)" == "skip" ]]; then
+            continue
+        fi
+
         strategy=$(plugin_snapshot_strategy "$plugin")
         kind=$(plugin_snapshot_kind "$plugin")
         key=$(run_hook "$plugin" "snapshot_key")
