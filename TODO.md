@@ -127,40 +127,7 @@ Out-of-band Docker state persistence — `rl warm rebuild` command.
 
 [done 2026-05-19, commit 003cfe2] snapshot_walk_vm_rebase loses earlier live layers' memory.bin. Fix: only touch incoming-memory.bin when the new layer is live (overwrite); on cold rebase, preserve. snapshot_walk_chain clears once at the start and before a miss-build boot. 3 new bats, 100/100.
 
-Skip rebase+boot+stop cycle for no-op snapshot_build layers.
-
-Surfaced by the 2026-05-19 e2e benchmark (see
-`../benchmark-2026-05-19.md`): every cold AND every warm pays ~5-7 s
-per layer that has nothing to do — mise without `mise.toml`,
-ruby-bundler without `Gemfile.lock`, npm without `package-lock.json`.
-The plugin's snapshot_build runs but exits immediately ("no
-Gemfile.lock, nothing to install"), yet the framework has already
-spent the time on `qemu-img create` overlay + `aq start` +
-`wait_for_ssh` + `aq stop` around it. On a project with three
-no-op layers, that's 15-21 s of pure overhead.
-
-Candidate fixes (pick when implementing):
-
-- **Plugin declares `idle_when_no_trigger = true`**. The framework
-  checks plugin triggers against the project before deciding whether
-  to walk the VM through this layer. If no trigger files matched at
-  `rl new` time, skip the entire iteration. Simple, but ties the
-  no-op decision to triggers (some plugins might no-op for other
-  reasons).
-- **Hook `snapshot_should_skip` returns 0/1 cheaply**. The plugin
-  decides whether its `snapshot_build` is going to be a no-op
-  (typically a single `[ -f Gemfile.lock ]` test). Framework calls
-  this BEFORE rebase+boot; if 1, skip the whole iteration. More
-  flexible than the trigger-coupled form.
-- **Lazy VM boot inside snapshot_build**. The plugin signals "ready
-  for build" by calling a framework helper that boots the VM on
-  demand. If snapshot_build returns without calling it, the VM is
-  never started. Cleanest at the framework layer; requires every
-  existing snapshot_build to be updated.
-
-Recommend the second (`snapshot_should_skip` hook) — preserves
-plugin authorship over the decision, no breaking change for plugins
-that don't implement it (default = don't skip).
+[done 2026-05-19, commit 0456f0f] Skip rebase+boot+stop cycle for no-op snapshot_build layers via `snapshot_should_skip` hook. Plugin prints "skip" to stdout to bail out of an iteration before VM boot. Stdout-based signal because the framework's plugin dispatch falls through to exit 0 when a hook isn't defined (exit-code protocol would mistake "absent" for "skip"). bakeri.sh's mise / ruby-bundler / npm adopt it (commit dfb1e55).
 
 Plugin protocol v2: "command-only plugin" semantic.
 
