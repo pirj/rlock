@@ -353,16 +353,22 @@ dispatch_command() {
     local cmd_name="$1"
     shift
 
-    # Find the command script first, without process substitution
-    # (process substitution steals stdin, breaking terminal-dependent commands).
+    # Two-pass lookup:
+    #   Pass 1: ACTIVE_PLUGINS — plugins activated for this project via
+    #           `rl new`. A plugin's command may depend on its provision
+    #           hook having run, so we prefer the active set first.
+    #   Pass 2: All DISCOVERABLE plugins (fallback for "command-only"
+    #           plugins like bake-run / bake-cache that have no
+    #           [snapshot] section and no provision-time work — they
+    #           are safe to invoke regardless of whether they appeared
+    #           in the project's active chain).
+    # Process substitution is avoided so terminal-dependent commands
+    # keep stdin.
     local cmd_script=""
-    local plugin
+    local plugin pdir commands cmd
     for plugin in ${ACTIVE_PLUGINS:-}; do
-        local pdir
         pdir=$(plugin_dir "$plugin") || continue
-        local commands
         commands=$(toml_get_array "$pdir/plugin.toml" "commands")
-        local cmd
         for cmd in $commands; do
             if [[ "$cmd" == "$cmd_name" ]]; then
                 cmd_script="$pdir/commands/${cmd_name}.sh"
@@ -370,6 +376,27 @@ dispatch_command() {
             fi
         done
     done
+
+    if [[ -z "$cmd_script" ]]; then
+        # Fallback: scan every discoverable plugin. Safe for command-only
+        # plugins (no [snapshot], no provision hook needs to have run).
+        local all_plugins
+        all_plugins=$(discover_plugins)
+        for plugin in $all_plugins; do
+            # Skip plugins already considered in pass 1.
+            case " ${ACTIVE_PLUGINS:-} " in
+                *" $plugin "*) continue ;;
+            esac
+            pdir=$(plugin_dir "$plugin") || continue
+            commands=$(toml_get_array "$pdir/plugin.toml" "commands")
+            for cmd in $commands; do
+                if [[ "$cmd" == "$cmd_name" ]]; then
+                    cmd_script="$pdir/commands/${cmd_name}.sh"
+                    break 2
+                fi
+            done
+        done
+    fi
 
     if [[ -n "$cmd_script" && -f "$cmd_script" ]]; then
         export RL_LIB_DIR="${RL_LIB_DIR:-$LIB_DIR}"

@@ -104,3 +104,53 @@ CMD
     assert_failure
     assert_output --partial "Unknown command"
 }
+
+@test "dispatch_command falls back to discoverable plugins (command-only)" {
+    # Command-only plugin: declares 'commands' but is NOT in ACTIVE_PLUGINS.
+    mkdir -p "$PLUGIN_CORE_DIR/bake-cache/commands"
+    cat > "$PLUGIN_CORE_DIR/bake-cache/plugin.toml" <<'EOF'
+description = "Cache inspector"
+commands = ["bake-cache"]
+EOF
+    cat > "$PLUGIN_CORE_DIR/bake-cache/commands/bake-cache.sh" <<'CMD'
+#!/usr/bin/env bash
+echo "cache-args:$*"
+CMD
+    chmod +x "$PLUGIN_CORE_DIR/bake-cache/commands/bake-cache.sh"
+
+    # ACTIVE_PLUGINS deliberately does NOT include bake-cache.
+    ACTIVE_PLUGINS=""
+    run dispatch_command "bake-cache" "ls"
+    assert_success
+    assert_output "cache-args:ls"
+}
+
+@test "dispatch_command prefers active plugin when both have command" {
+    # Both plugins declare the same command name. Active one wins.
+    mkdir -p "$PLUGIN_CORE_DIR/active-host/commands"
+    cat > "$PLUGIN_CORE_DIR/active-host/plugin.toml" <<'EOF'
+description = "Active"
+commands = ["mycmd"]
+EOF
+    cat > "$PLUGIN_CORE_DIR/active-host/commands/mycmd.sh" <<'CMD'
+#!/usr/bin/env bash
+echo "active"
+CMD
+    chmod +x "$PLUGIN_CORE_DIR/active-host/commands/mycmd.sh"
+
+    mkdir -p "$PLUGIN_CORE_DIR/inactive-host/commands"
+    cat > "$PLUGIN_CORE_DIR/inactive-host/plugin.toml" <<'EOF'
+description = "Inactive fallback"
+commands = ["mycmd"]
+EOF
+    cat > "$PLUGIN_CORE_DIR/inactive-host/commands/mycmd.sh" <<'CMD'
+#!/usr/bin/env bash
+echo "fallback"
+CMD
+    chmod +x "$PLUGIN_CORE_DIR/inactive-host/commands/mycmd.sh"
+
+    ACTIVE_PLUGINS="active-host"
+    run dispatch_command "mycmd"
+    assert_success
+    assert_output "active"
+}
