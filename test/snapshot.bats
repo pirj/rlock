@@ -155,19 +155,65 @@ M
     assert_output "MEMORY-STATE"
 }
 
-@test "snapshot_walk_vm_rebase clears stale incoming-memory.bin for cold entry" {
+@test "snapshot_walk_vm_rebase preserves incoming-memory.bin from earlier live ancestor when this layer is cold" {
+    # Chain: live ancestor placed incoming-memory.bin; later cold rebase
+    # must NOT clear it (a cold layer on top of a live one is a typical
+    # bakeri.sh shape: docker-compose live, mise/ruby-bundler/npm cold).
     local backing="$BATS_TEST_TMPDIR/cache/foo/k_cold/disk.qcow2"
     mkdir -p "$(dirname "$backing")"
     qemu-img create -f qcow2 "$backing" 1M >/dev/null
     # No meta.json → entry treated as cold
     local vm_dir="$BATS_TEST_TMPDIR/vm/foo"
     mkdir -p "$vm_dir"
-    # Pre-existing stale incoming-memory.bin from a previous live rebase
-    echo "STALE" > "$vm_dir/incoming-memory.bin"
+    echo "LIVE-MEMORY-FROM-EARLIER-LAYER" > "$vm_dir/incoming-memory.bin"
     export AQ_STATE_DIR="$BATS_TEST_TMPDIR/vm"
 
     snapshot_walk_vm_rebase "foo" "$backing"
-    [ ! -f "$vm_dir/incoming-memory.bin" ]
+    [ -f "$vm_dir/incoming-memory.bin" ]
+    run cat "$vm_dir/incoming-memory.bin"
+    assert_output "LIVE-MEMORY-FROM-EARLIER-LAYER"
+}
+
+@test "snapshot_walk_vm_rebase overwrites incoming-memory.bin when this layer is live" {
+    # A later live layer's memory state supersedes any earlier one.
+    local backing="$BATS_TEST_TMPDIR/cache/foo/k_live2/disk.qcow2"
+    mkdir -p "$(dirname "$backing")"
+    qemu-img create -f qcow2 "$backing" 1M >/dev/null
+    echo "NEW-LIVE-MEMORY" > "$(dirname "$backing")/memory.bin"
+    cat > "$(dirname "$backing")/meta.json" <<'M'
+{ "kind": "live" }
+M
+
+    local vm_dir="$BATS_TEST_TMPDIR/vm/foo"
+    mkdir -p "$vm_dir"
+    echo "OLDER-LIVE-MEMORY" > "$vm_dir/incoming-memory.bin"
+    export AQ_STATE_DIR="$BATS_TEST_TMPDIR/vm"
+
+    snapshot_walk_vm_rebase "foo" "$backing"
+    run cat "$vm_dir/incoming-memory.bin"
+    assert_output "NEW-LIVE-MEMORY"
+}
+
+@test "snapshot_walk_chain clears stale incoming-memory.bin at start" {
+    # A leftover incoming-memory.bin from a previous `rl new` session
+    # must be cleared before walking — otherwise it would be applied
+    # spuriously when no plugin in this chain is kind=live.
+    source "$LIB_DIR/plugin.sh"
+    _setup_fake_plugin "p-stale" "cached" "k-s"
+    local fakedisk="$BATS_TEST_TMPDIR/vm-stale/storage.qcow2"
+    mkdir -p "$BATS_TEST_TMPDIR/vm-stale"
+    qemu-img create -f qcow2 "$fakedisk" 1M >/dev/null
+    echo "STALE-FROM-PRIOR-SESSION" > "$BATS_TEST_TMPDIR/vm-stale/incoming-memory.bin"
+
+    snapshot_walk_vm_disk()   { echo "$fakedisk"; }
+    snapshot_walk_vm_boot()   { :; }
+    snapshot_walk_vm_stop()   { :; }
+    snapshot_walk_vm_rebase() { :; }
+
+    : > "$BATS_TEST_TMPDIR/built.log"
+    run snapshot_walk_chain "vm-stale" "p-stale"
+    assert_success
+    [ ! -f "$BATS_TEST_TMPDIR/vm-stale/incoming-memory.bin" ]
 }
 
 # --- snapshot_walk_chain ---

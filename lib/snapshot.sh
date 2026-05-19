@@ -140,9 +140,21 @@ snapshot_aq_tag_dir() {
 
 snapshot_walk_vm_rebase() {
     # Replace VM disk with a new qcow2 backed by the given file.
-    # If the cache entry alongside the backing file is a live snapshot,
-    # also place memory.bin as the VM's incoming-memory.bin so the next
-    # `aq start` resumes via `-incoming file:...`.
+    #
+    # incoming-memory.bin policy:
+    #   * If the new layer is kind=live: overwrite incoming-memory.bin
+    #     with this layer's memory.bin. A later live layer's memory state
+    #     supersedes any earlier one.
+    #   * If the new layer is kind=cold: PRESERVE any existing
+    #     incoming-memory.bin. A typical chain is live (e.g. docker-
+    #     compose warm) followed by cold (mise/ruby-bundler/npm no-op
+    #     layers). Their disk overlays add nothing, so the earlier live
+    #     layer's memory state is still semantically valid for the
+    #     restore. Clearing here would force a fresh cold boot at every
+    #     restore even when an upstream live snapshot was available.
+    #
+    # Stale incoming-memory.bin from a previous `rl new` session is
+    # handled by `snapshot_walk_chain` clearing once at the start.
     local vm="$1" backing="$2"
     local disk vm_dir kind cache_dir
     disk=$(snapshot_walk_vm_disk "$vm")
@@ -150,16 +162,15 @@ snapshot_walk_vm_rebase() {
     rm -f "$disk"
     snapshot_rebase "$disk" "$backing"
 
-    # Always clear stale incoming-memory.bin from previous iterations.
-    rm -f "$vm_dir/incoming-memory.bin"
-
     kind=$(snapshot_entry_kind "$backing")
     if [[ "$kind" == "live" ]]; then
         cache_dir=$(dirname "$backing")
+        rm -f "$vm_dir/incoming-memory.bin"
         if [[ -f "$cache_dir/memory.bin" ]]; then
             cp "$cache_dir/memory.bin" "$vm_dir/incoming-memory.bin"
         fi
     fi
+    # kind=cold: leave any existing incoming-memory.bin in place.
 }
 
 # Walk the layer chain for an ordered plugin list.
@@ -186,6 +197,13 @@ snapshot_walk_chain() {
     # Each iteration may rebase the VM disk; the VM must be stopped first.
     snapshot_walk_vm_stop "$vm"
 
+    # Clear any stale incoming-memory.bin from a prior `rl new` session.
+    # Subsequent rebases will only re-create it when restoring a live
+    # cache hit (snapshot_walk_vm_rebase handles the per-layer policy).
+    local _vm_dir
+    _vm_dir=$(dirname "$(snapshot_walk_vm_disk "$vm")")
+    rm -f "$_vm_dir/incoming-memory.bin"
+
     local plugin strategy kind key cache_path latest
     for plugin in "$@"; do
         plugin_has_snapshot "$plugin" || continue
@@ -211,6 +229,13 @@ snapshot_walk_chain() {
         # For cached: VM is already on parent's qcow2 (rebased on previous
         # iteration's cache hit, or initial backing).
         # For ephemeral: same — run on whatever the VM disk currently is.
+
+        # We're about to boot the VM to run `snapshot_build` on top of the
+        # parent's disk state. An earlier live ancestor's memory.bin would
+        # cause `-incoming file:` to resume mid-flight; we don't want that
+        # during a build (the build expects a clean cold boot at the new
+        # disk content). Clear it for this iteration.
+        rm -f "$_vm_dir/incoming-memory.bin"
 
         snapshot_walk_vm_boot "$vm"
         run_hook "$plugin" "snapshot_build" "$vm"
