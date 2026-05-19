@@ -1,6 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# ---------------------------------------------------------------------
+# Generic TOML helpers — no rlock-specific state, no plugin-protocol
+# assumptions baked in. Functions take a TOML file path + key/section
+# arguments and operate purely on the file. Safe to source from
+# downstream consumers:
+#
+#   * rlock itself — `bin/rl` uses these to parse `plugin.toml`
+#     manifests and project-local rlock state.
+#   * Distributions on top of rlock (bakeri.sh, ai.rlock) — source via
+#     `source "${RL_LIB_DIR}/toml.sh"` (RL_LIB_DIR is exported by rlock
+#     into every plugin's environment) for distribution-specific config
+#     files such as `bakeri.toml`. Don't reach into rlock's plugin
+#     internals — keep this file the only shared surface.
+#
+# Anything added here must work for any TOML file, not just rlock's
+# plugin manifests. If you need rlock-specific semantics, put them in
+# `lib/plugin.sh` instead.
+# ---------------------------------------------------------------------
+
 # Parse a string value from a flat TOML file.
 # Usage: toml_get file key
 # Prints the value (unquoted) or empty string if key not found.
