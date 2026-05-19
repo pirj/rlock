@@ -87,3 +87,27 @@ EOF
     run plugin_dir "nonexistent"
     assert_failure
 }
+
+@test "discover_plugins hides names starting with underscore" {
+    mkdir -p "$PLUGIN_CORE_DIR/git" "$PLUGIN_CORE_DIR/_base"
+    cat > "$PLUGIN_CORE_DIR/git/plugin.toml" <<'EOF'
+description = "Git"
+EOF
+    cat > "$PLUGIN_CORE_DIR/_base/plugin.toml" <<'EOF'
+description = "Framework base"
+EOF
+    run discover_plugins
+    assert_success
+    assert_output "git"
+    refute_output --partial "_base"
+}
+
+@test "plugin_dir still resolves underscore-prefixed framework plugins" {
+    mkdir -p "$PLUGIN_CORE_DIR/_base"
+    cat > "$PLUGIN_CORE_DIR/_base/plugin.toml" <<'EOF'
+description = "Framework base"
+EOF
+    run plugin_dir "_base"
+    assert_success
+    assert_output "$PLUGIN_CORE_DIR/_base"
+}

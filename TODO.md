@@ -83,23 +83,13 @@ aq --memory=NG flag + live-snapshot RAM hotplug.
    (see specs/2026-05-18-snapshot-kind-design.md) need both before they
    can declare kind = "live" on Docker-class workloads.
 
-Framework-base snapshot layer (in rlock itself, not in any distribution).
- - Today `cmd_new` runs base provisioning (apk add bash curl sudo
-   openssh-server-pam + rlock user + sshd hardening) inline. Skipped on
-   warm path when any plugin has a cache hit, but on FIRST cold run for
-   any project it costs ~15-30 s. Same work runs again on every fresh
-   project.
- - Promote this into a built-in snapshot layer keyed by the framework's
-   own recipe hash. Shared across every distribution and every project:
-     framework-base
-       |-- ai.rlock chain (+auth-proxy / +agent-* / +git ...)
-       `-- bakeri.sh chain (+docker-engine / +docker-compose / +deps ...)
- - Requires a way for the framework to participate in walk_chain
-   alongside plugin layers. Cleanest: ship a hidden "core" plugin in
-   rlock with [snapshot] strategy="cached" that produces the framework
-   base, deps = [] so it sorts first.
- - Measurement first (per Snapshot analytics TODO): confirm the savings
-   are worth the added complexity before implementing.
+[done 2026-05-19] Framework-base shared snapshot layer. The apk-add /
+rlock-user / sshd-hardening block previously inline in `cmd_new` lives
+in `plugins/_base` with a constant `snapshot_key`. `discover_plugins`
+skips `_`-prefixed names so the layer is invisible to triggers and the
+plugin CLI but `plugin_dir` still resolves it. `cmd_new` prepends
+`_base` to walk_chain. Second cold `rl new` on the host hits the cache
+regardless of distribution.
 
 Linear chain limitation (deferred from layered-snapshots design).
  - qcow2 backing files are linear, so two sibling plugins (e.g. ruby-bundler

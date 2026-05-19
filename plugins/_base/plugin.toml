@@ -1,0 +1,10 @@
+description = "Framework-level base provisioning (apk base packages + rlock user + sshd hardening). Auto-included by rl new; not directly user-selectable. The leading underscore in the plugin name hides it from discover_plugins / detect_triggers."
+protocol_version = "1"
+deps = []
+host_deps = []
+triggers = []
+commands = []
+
+[snapshot]
+strategy = "cached"
+kind = "cold"

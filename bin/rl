@@ -93,24 +93,6 @@ cmd_new() {
         check_command_conflicts "${resolved[@]}"
     fi
 
-    # Pre-flight: if any plugin's snapshot already exists, walk_chain will
-    # rebase the VM disk onto it — overwriting whatever base provisioning we
-    # would have done. Skip base provisioning in that case (the cached layer
-    # already contains it).
-    local has_cache_hit=0
-    local plugin key
-    if [[ ${#resolved[@]} -gt 0 ]]; then
-        for plugin in "${resolved[@]}"; do
-            plugin_has_snapshot "$plugin" || continue
-            key=$(run_hook "$plugin" "snapshot_key" 2>/dev/null) || continue
-            [[ -n "$key" ]] || continue
-            if snapshot_lookup "$plugin" "$key" >/dev/null 2>&1; then
-                has_cache_hit=1
-                break
-            fi
-        done
-    fi
-
     # Create VM
     local vm_name
     vm_name=$(get_vm_name)
@@ -146,66 +128,18 @@ cmd_new() {
     fi
     spinner_stop "SSH ready"
 
-    # Base provisioning: create rlock user, install essentials.
-    # Skipped on warm path — walk_chain will rebase to a cached layer that
-    # already contains the equivalent state, and any work here would be lost.
-    if [[ $has_cache_hit -eq 0 ]]; then
-    spinner_start "Provisioning base environment"
-    aq exec "$vm_name" sh <<'BASE_PROVISION'
-set -eu
-# Enlarge /tmp — default tmpfs is too small for compiling runtimes
-mount -o remount,size=1G /tmp
-
-sed -i 's/^#\(.*community\)/\1/' /etc/apk/repositories
-apk update
-apk add bash curl sudo openssh-server-pam
-adduser -D -s /bin/bash rlock
-echo "rlock ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/rlock
-mkdir -p /home/rlock/.ssh
-cp /root/.ssh/authorized_keys /home/rlock/.ssh/
-chown -R rlock:rlock /home/rlock/.ssh
-chmod 700 /home/rlock/.ssh
-chmod 600 /home/rlock/.ssh/authorized_keys
-
-# sshd hardening. AllowTcpForwarding and X11Forwarding already set in sshd_config.
-cat > /etc/ssh/sshd_config.d/base.conf <<'SSHD'
-# Allow locked accounts (no password) to authenticate via pubkey.
-# The rlock user has no password by design — keys are the only auth method.
-UsePAM yes
-
-# Default is "yes". Disable — pubkey only, no password prompts.
-PasswordAuthentication no
-
-# Default is "yes". Disable — prevents challenge-response password fallback.
-KbdInteractiveAuthentication no
-
-# Default is "yes". Disable — agent in the VM must not reach host SSH keys.
-AllowAgentForwarding no
-
-# Default is "yes". Disable — aq already shows its own motd.
-PrintMotd no
-
-# Default is "prohibit-password" (matches our intent). Be explicit:
-# root can SSH in for provisioning, but only via pubkey.
-PermitRootLogin prohibit-password
-SSHD
-rc-service sshd restart
-BASE_PROVISION
-    spinner_stop "Base environment ready"
-    else
-        info "Cache hit detected — skipping base provisioning"
-    fi
-
     # Walk the snapshot layer chain.
-    # Plugins with [snapshot] participate; others are skipped here.
-    if [[ ${#resolved[@]} -gt 0 ]]; then
-        spinner_start "Walking snapshot layers"
-        snapshot_walk_chain "$vm_name" "${resolved[@]}"
-        spinner_stop "Layers ready"
-        # Boot the VM back up after the chain leaves it stopped.
-        aq start "$vm_name" >/dev/null
-        wait_for_ssh "$vm_name" 60 >/dev/null
-    fi
+    # `_base` is always prepended: it's the framework-internal layer that
+    # carries the apk-add / rlock-user / sshd-hardening provisioning shared
+    # across every rlock distribution. After the first cold rl new on a
+    # host, every subsequent cold (any distribution, any project) gets a
+    # cache hit on _base instead of re-paying ~30 s of base provisioning.
+    spinner_start "Walking snapshot layers"
+    snapshot_walk_chain "$vm_name" "_base" "${resolved[@]}"
+    spinner_stop "Layers ready"
+    # Boot the VM back up after the chain leaves it stopped.
+    aq start "$vm_name" >/dev/null
+    wait_for_ssh "$vm_name" 60 >/dev/null
 
     # Run provision hooks for plugins WITHOUT [snapshot] (legacy + side-effect-only)
     local plugin

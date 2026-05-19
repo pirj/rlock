@@ -114,13 +114,18 @@ max_snapshot_memory() {
 
 # Discover all available plugins.
 # Prints plugin names (one per line), sorted alphabetically.
+# Names starting with an underscore are framework-internal (e.g. `_base`)
+# and are hidden from user-facing surfaces — they're auto-included by
+# the dispatcher rather than chosen by triggers or CLI args.
 discover_plugins() {
-    local dir plugin_dir_path
+    local dir plugin_dir_path name
     for dir in "$PLUGIN_CORE_DIR" "$PLUGIN_USER_DIR"; do
         [[ -d "$dir" ]] || continue
         for plugin_dir_path in "$dir"/*/; do
             [[ -f "${plugin_dir_path}plugin.toml" ]] || continue
-            basename "$plugin_dir_path"
+            name=$(basename "$plugin_dir_path")
+            [[ "$name" == _* ]] && continue
+            echo "$name"
         done
     done | sort -u
 }
