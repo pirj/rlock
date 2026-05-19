@@ -125,29 +125,7 @@ Out-of-band Docker state persistence — `rl warm rebuild` command.
    live tweaks into the cached snapshot.
  - From specs/2026-05-11-layered-snapshots-design.md "Known limitations".
 
-snapshot_walk_vm_rebase loses earlier live layers' memory.bin.
-
-Surfaced by the 2026-05-19 e2e benchmark + isolated bench. The
-current rebase logic clears incoming-memory.bin and re-creates it
-ONLY if the rebased-to layer is kind=live. Chain like
-docker-engine(cold) → docker-compose(live) → mise(cold) →
-ruby-bundler(cold) → npm(cold): after docker-compose's rebase places
-memory.bin, the next cold rebase (mise) deletes it again. Result:
-post-walk_chain, the VM is left with the topmost layer's disk and
-NO memory.bin — `aq start` boots fresh. kind=live never delivers
-sub-second restart.
-
-Fix: snapshot_walk_vm_rebase should NOT clear incoming-memory.bin
-unconditionally. Instead, the framework should track "the most
-recent live ancestor in the chain" and place ITS memory.bin if no
-later live layer overrides. Concretely: drop the `rm -f
-$vm_dir/incoming-memory.bin` line; only overwrite when the new layer
-is itself live.
-
-The cold→live→cold case is the common one (docker-compose at the
-bottom, lockfile-based dep installers above it). Live as the topmost
-layer would work today; but that's an unusual chain shape for
-bakeri.sh.
+[done 2026-05-19, commit 003cfe2] snapshot_walk_vm_rebase loses earlier live layers' memory.bin. Fix: only touch incoming-memory.bin when the new layer is live (overwrite); on cold rebase, preserve. snapshot_walk_chain clears once at the start and before a miss-build boot. 3 new bats, 100/100.
 
 Skip rebase+boot+stop cycle for no-op snapshot_build layers.
 
