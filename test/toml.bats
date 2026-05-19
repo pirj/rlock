@@ -105,3 +105,91 @@ EOF
     assert_success
     assert_output "cached"
 }
+
+@test "toml_validate accepts a file with all-unique headers" {
+    cat > "$TEST_TOML" <<'EOF'
+description = "ok"
+
+[snapshot]
+strategy = "cached"
+
+[prebuild.schema-load]
+cmd = "rails db:schema:load"
+
+[prebuild.migrate]
+cmd = "rails db:migrate"
+EOF
+    run toml_validate "$TEST_TOML"
+    assert_success
+}
+
+@test "toml_validate flags a duplicate header" {
+    cat > "$TEST_TOML" <<'EOF'
+[fruit]
+apple = "red"
+
+[fruit]
+orange = "orange"
+EOF
+    run toml_validate "$TEST_TOML"
+    assert_failure
+    assert_output --partial "duplicate table headers"
+    assert_output --partial "[fruit]"
+}
+
+@test "toml_validate flags multiple distinct duplicates" {
+    cat > "$TEST_TOML" <<'EOF'
+[a]
+x = 1
+
+[b]
+y = 2
+
+[a]
+x = 3
+
+[b]
+y = 4
+EOF
+    run toml_validate "$TEST_TOML"
+    assert_failure
+    assert_output --partial "[a]"
+    assert_output --partial "[b]"
+}
+
+@test "toml_validate does not confuse [a.b] with [a]" {
+    cat > "$TEST_TOML" <<'EOF'
+[a]
+x = 1
+
+[a.b]
+y = 2
+
+[a.c]
+z = 3
+EOF
+    run toml_validate "$TEST_TOML"
+    assert_success
+}
+
+@test "toml_validate ignores trailing comments when deduping" {
+    cat > "$TEST_TOML" <<'EOF'
+[fruit]   # the first one
+apple = "red"
+
+[fruit]
+orange = "orange"
+EOF
+    run toml_validate "$TEST_TOML"
+    assert_failure
+    assert_output --partial "[fruit]"
+}
+
+@test "toml_validate is silent on a file with no sections" {
+    cat > "$TEST_TOML" <<'EOF'
+description = "flat"
+strategy = "cached"
+EOF
+    run toml_validate "$TEST_TOML"
+    assert_success
+}

@@ -33,3 +33,31 @@ toml_get_in_section() {
         }
     ' "$file"
 }
+
+# Validate that no table header repeats in a TOML file.
+# TOML 1.0 forbids re-declaring a table — `[fruit]` … `[fruit]` is an
+# error. Catches the common copy-paste mistake when projects grow
+# `[prebuild.foo]` / `[prebuild.bar]` style sections. Subtables (`[a.b]`
+# vs `[a]`) are *not* flagged — they're distinct tables.
+#
+# Usage: toml_validate file
+# Returns 0 if clean, 1 (with stderr message listing the offenders) if
+# any header appears more than once.
+toml_validate() {
+    local file="$1"
+    local dups
+    # Match table headers `[anything-without-brackets]` only — `[[array
+    # -of-tables]]` syntax is intentionally not supported, and repeated
+    # `[[…]]` lines (which TOML *does* allow) wouldn't be flagged here
+    # because the grep requires single brackets. Trailing comments /
+    # whitespace are stripped before deduping.
+    dups=$(grep -E '^\[[^][]+\]' "$file" 2>/dev/null \
+        | sed -E 's/[[:space:]]*#.*$//' \
+        | sort | uniq -d)
+    if [[ -n "$dups" ]]; then
+        echo "Error: $file has duplicate table headers (TOML forbids this):" >&2
+        printf '  %s\n' $dups >&2
+        return 1
+    fi
+    return 0
+}
