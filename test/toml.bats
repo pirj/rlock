@@ -193,3 +193,58 @@ EOF
     run toml_validate "$TEST_TOML"
     assert_success
 }
+
+@test "toml_get_array_in_section reads an array key inside a section" {
+    cat > "$TEST_TOML" <<'EOF'
+[prebuild.migrate]
+cmd = "rails db:migrate"
+key_files = ["db/schema.rb", "db/migrate/*.rb"]
+EOF
+    run toml_get_array_in_section "$TEST_TOML" "prebuild.migrate" "key_files"
+    assert_success
+    assert_line --index 0 "db/schema.rb"
+    assert_line --index 1 "db/migrate/*.rb"
+}
+
+@test "toml_get_array_in_section returns empty when section missing" {
+    cat > "$TEST_TOML" <<'EOF'
+[other]
+key_files = ["x"]
+EOF
+    run toml_get_array_in_section "$TEST_TOML" "prebuild.foo" "key_files"
+    assert_success
+    assert_output ""
+}
+
+@test "toml_get_array_in_section returns empty when key missing in section" {
+    cat > "$TEST_TOML" <<'EOF'
+[prebuild.foo]
+cmd = "x"
+EOF
+    run toml_get_array_in_section "$TEST_TOML" "prebuild.foo" "key_files"
+    assert_success
+    assert_output ""
+}
+
+@test "toml_get_array_in_section does not bleed across sections" {
+    cat > "$TEST_TOML" <<'EOF'
+[prebuild.a]
+key_files = ["only-a"]
+
+[prebuild.b]
+key_files = ["only-b"]
+EOF
+    run toml_get_array_in_section "$TEST_TOML" "prebuild.b" "key_files"
+    assert_success
+    assert_output "only-b"
+}
+
+@test "toml_get_array_in_section handles single-element array" {
+    cat > "$TEST_TOML" <<'EOF'
+[prebuild.schema]
+key_files = ["db/schema.rb"]
+EOF
+    run toml_get_array_in_section "$TEST_TOML" "prebuild.schema" "key_files"
+    assert_success
+    assert_output "db/schema.rb"
+}

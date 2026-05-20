@@ -53,6 +53,32 @@ toml_get_in_section() {
     ' "$file"
 }
 
+# Parse an array value from a [section] in a TOML file.
+# Usage: toml_get_array_in_section file section key
+# Prints one element per line. Empty output if section/key missing or
+# array empty. Single-line array form only (`key = ["a", "b"]`); the
+# multi-line form (`key = [\n "a",\n "b",\n]`) is intentionally not
+# supported — keep it simple, and TOML allows the single-line form
+# everywhere.
+toml_get_array_in_section() {
+    local file="$1" section="$2" key="$3"
+    awk -v sec="[$section]" -v k="$key" '
+        $0 == sec { in_sec = 1; next }
+        /^\[/     { in_sec = 0; next }
+        in_sec && $0 ~ "^" k " *= *\\[" {
+            sub("^[^[]*\\[", "")
+            sub("\\].*", "")
+            n = split($0, items, ",")
+            for (i = 1; i <= n; i++) {
+                if (match(items[i], /"[^"]*"/)) {
+                    print substr(items[i], RSTART + 1, RLENGTH - 2)
+                }
+            }
+            exit
+        }
+    ' "$file"
+}
+
 # Validate that no table header repeats in a TOML file.
 # TOML 1.0 forbids re-declaring a table — `[fruit]` … `[fruit]` is an
 # error. Catches the common copy-paste mistake when projects grow
