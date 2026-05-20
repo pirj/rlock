@@ -32,6 +32,21 @@ USAGE
 }
 
 cmd_new() {
+    # Parse leading flags. Positional args after them are plugin names.
+    # --memory=<N|NG>  Override the per-plugin max_snapshot_memory
+    #                  computation (passed straight to aq new --memory).
+    #                  Stripping any trailing G so both "4" and "4G"
+    #                  are accepted.
+    local memory_override=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --memory=*) memory_override="${1#--memory=}"; shift ;;
+            --memory)   memory_override="${2:-}"; shift 2 ;;
+            --)         shift; break ;;
+            --*)        die "Unknown flag to 'rl new': $1" ;;
+            *)          break ;;
+        esac
+    done
     local -a requested=("$@")
 
     # Check base host deps
@@ -102,18 +117,23 @@ cmd_new() {
         die "Airlock '$vm_name' already exists. Run 'rl rm' first."
     fi
 
-    # Compute the max RAM declared across active plugins (via the
-    # [snapshot] memory = "NG" field). Plugins that need more than aq's
-    # default 1G (notably docker-compose with kind = "live") declare
-    # their need; the framework collects the max and passes it as
-    # --memory=NG. Plugins that don't declare memory contribute nothing.
+    # Resolve memory for `aq new --memory`. Precedence:
+    #   1. --memory flag (parsed at the top of cmd_new) — explicit user
+    #      override, e.g. from `bakerish.toml [memory] size`.
+    #   2. max across active plugins' [snapshot] memory = "NG" — auto-
+    #      derived. Plugins that need more than aq's default 1G
+    #      (notably docker-compose with kind = "live") declare it; the
+    #      framework picks the max.
+    #   3. unset (= aq's own 1G default).
     local -a aq_new_args=("--size=16G")
-    if [[ ${#resolved[@]} -gt 0 ]]; then
-        local _max_mem
-        _max_mem=$(max_snapshot_memory "${resolved[@]}")
-        if [[ -n "$_max_mem" ]]; then
-            aq_new_args+=("--memory=${_max_mem}G")
-        fi
+    local _mem=""
+    if [[ -n "$memory_override" ]]; then
+        _mem="${memory_override%G}"
+    elif [[ ${#resolved[@]} -gt 0 ]]; then
+        _mem=$(max_snapshot_memory "${resolved[@]}")
+    fi
+    if [[ -n "$_mem" ]]; then
+        aq_new_args+=("--memory=${_mem}G")
     fi
 
     spinner_start "Creating VM"
