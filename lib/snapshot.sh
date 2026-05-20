@@ -199,10 +199,6 @@ snapshot_walk_vm_rebase() {
 #   * incremental: lookup by current key; miss → boot on latest-of-plugin
 #                  (any key) else parent, build, save under current key.
 #
-# (`ephemeral` was a third option through 2026-05-19 but had zero
-# adopting plugins — work that wanted "always re-run" either fits as
-# cached with explicit key_files OR as a `start` hook.)
-#
 # Kind controls snapshot capture format:
 #   * cold: VM stopped, qemu-img convert disk into cache. Restore on next
 #           run = qemu-img rebase. No memory captured.

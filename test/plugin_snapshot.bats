@@ -51,15 +51,6 @@ _make_plugin() {
     assert_output --partial "unknown snapshot strategy"
 }
 
-@test "plugin_snapshot_strategy rejects removed 'ephemeral' with migration hint" {
-    _make_plugin "p5e" 'description = "P"' '[snapshot]' 'strategy = "ephemeral"'
-    run plugin_snapshot_strategy "p5e"
-    assert_failure
-    assert_output --partial "ephemeral"
-    assert_output --partial "removed"
-    assert_output --partial "start"
-}
-
 @test "plugin_snapshot_kind defaults to cold when empty" {
     _make_plugin "pk1" 'description = "P"' '[snapshot]' 'strategy = "cached"'
     run plugin_snapshot_kind "pk1"

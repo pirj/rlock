@@ -296,10 +296,6 @@ cmd_warm_rebuild() {
         || die "No plugin with [snapshot] in active chain — nothing to promote."
 
     local kind key
-    # plugin_snapshot_strategy validation runs as a side-effect to refuse
-    # legacy 'ephemeral' (removed 2026-05-20); we don't branch on the
-    # returned strategy here since both cached and incremental promote
-    # the running VM into the keyed cache slot identically.
     plugin_snapshot_strategy "$topmost" >/dev/null
 
     kind=$(plugin_snapshot_kind "$topmost")
