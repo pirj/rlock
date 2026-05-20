@@ -37,11 +37,17 @@ cmd_new() {
     #                  computation (passed straight to aq new --memory).
     #                  Stripping any trailing G so both "4" and "4G"
     #                  are accepted.
+    # --name=<vm-name> Override the default VM name (basename of cwd).
+    #                  Used by `bake run --vm-suffix` to create per-
+    #                  shard VMs from a single project dir.
     local memory_override=""
+    local name_override=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --memory=*) memory_override="${1#--memory=}"; shift ;;
             --memory)   memory_override="${2:-}"; shift 2 ;;
+            --name=*)   name_override="${1#--name=}"; shift ;;
+            --name)     name_override="${2:-}"; shift 2 ;;
             --)         shift; break ;;
             --*)        die "Unknown flag to 'rl new': $1" ;;
             *)          break ;;
@@ -111,7 +117,7 @@ cmd_new() {
 
     # Create VM
     local vm_name
-    vm_name=$(get_vm_name)
+    vm_name="${name_override:-$(get_vm_name)}"
 
     if [[ -d "$AQ_STATE_DIR/$vm_name" ]]; then
         die "Airlock '$vm_name' already exists. Run 'rl rm' first."
