@@ -295,10 +295,12 @@ cmd_warm_rebuild() {
     [[ -n "$topmost" ]] \
         || die "No plugin with [snapshot] in active chain — nothing to promote."
 
-    local strategy kind key
-    strategy=$(plugin_snapshot_strategy "$topmost")
-    [[ "$strategy" != "ephemeral" ]] \
-        || die "Topmost layer '$topmost' is ephemeral — its cache slot does not persist."
+    local kind key
+    # plugin_snapshot_strategy validation runs as a side-effect to refuse
+    # legacy 'ephemeral' (removed 2026-05-20); we don't branch on the
+    # returned strategy here since both cached and incremental promote
+    # the running VM into the keyed cache slot identically.
+    plugin_snapshot_strategy "$topmost" >/dev/null
 
     kind=$(plugin_snapshot_kind "$topmost")
     key=$(run_hook "$topmost" "snapshot_key")

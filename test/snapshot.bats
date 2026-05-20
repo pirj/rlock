@@ -455,26 +455,6 @@ SH
     [ -f "$RL_CACHE_DIR/p3/new-key/disk.qcow2" ]
 }
 
-@test "snapshot_walk_chain ephemeral: runs build but does not save a snapshot disk" {
-    source "$LIB_DIR/plugin.sh"
-    _setup_fake_plugin "p4" "ephemeral" "k4"
-
-    local fakedisk="$BATS_TEST_TMPDIR/disk.qcow2"
-    qemu-img create -f qcow2 "$fakedisk" 1M >/dev/null
-    snapshot_walk_vm_boot()   { :; }
-    snapshot_walk_vm_stop()   { :; }
-    snapshot_walk_vm_disk()   { echo "$fakedisk"; }
-    snapshot_walk_vm_rebase() { :; }
-
-    : > "$BATS_TEST_TMPDIR/built.log"
-    snapshot_walk_chain "fakevm" "p4"
-    grep -q "BUILT:p4" "$BATS_TEST_TMPDIR/built.log"
-    # Ephemeral writes no disk.qcow2 / memory.bin. stats.json may exist
-    # (every iteration is recorded as a miss for analytics).
-    [ ! -f "$RL_CACHE_DIR/p4/disk.qcow2" ]
-    [ ! -f "$RL_CACHE_DIR/p4/memory.bin" ]
-}
-
 @test "snapshot_walk_chain coalesces consecutive cache hits into one rebase" {
     # Three plugins all cache-hit. Pre-v2 the loop rebased N times;
     # post-v2 it defers each hit's rebase and only materialises the last

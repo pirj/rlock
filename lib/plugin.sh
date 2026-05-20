@@ -42,6 +42,12 @@ plugin_has_snapshot() {
 # Print the snapshot strategy declared by a plugin.
 # Defaults to "cached" when [snapshot] is present but strategy is unset.
 # Returns 1 with an error on unknown strategy.
+#
+# `ephemeral` was supported as a third option through 2026-05-19 but had
+# zero adopting plugins — everything that wanted "always re-run" either
+# fit better as a [snapshot] strategy="cached" with proper key_files OR
+# as a `start` hook that runs post-restore. Removed to keep the protocol
+# surface tight; if it ever returns, do it under protocol_version = 2.
 plugin_snapshot_strategy() {
     local plugin="$1"
     local pdir
@@ -50,7 +56,8 @@ plugin_snapshot_strategy() {
     s=$(toml_get_in_section "$pdir/plugin.toml" "snapshot" "strategy")
     s="${s:-cached}"
     case "$s" in
-        cached|incremental|ephemeral) echo "$s" ;;
+        cached|incremental) echo "$s" ;;
+        ephemeral) echo "Plugin '$plugin' declares snapshot strategy 'ephemeral' which was removed 2026-05-20. Use 'cached' with explicit key_files, or move the work to a 'start' hook." >&2; return 1 ;;
         *) echo "Plugin '$plugin' declares unknown snapshot strategy '$s'" >&2; return 1 ;;
     esac
 }

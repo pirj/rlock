@@ -198,9 +198,12 @@ snapshot_walk_vm_rebase() {
 #   * cached:      lookup by current key; miss → boot on parent, build, save.
 #   * incremental: lookup by current key; miss → boot on latest-of-plugin
 #                  (any key) else parent, build, save under current key.
-#   * ephemeral:   never cached. Boot on parent, build, do not save.
 #
-# Kind controls snapshot capture format (cached / incremental only):
+# (`ephemeral` was a third option through 2026-05-19 but had zero
+# adopting plugins — work that wanted "always re-run" either fits as
+# cached with explicit key_files OR as a `start` hook.)
+#
+# Kind controls snapshot capture format:
 #   * cold: VM stopped, qemu-img convert disk into cache. Restore on next
 #           run = qemu-img rebase. No memory captured.
 #   * live: VM running, aq snapshot create captures memory + disk via QMP.
@@ -232,8 +235,8 @@ snapshot_walk_chain() {
     # (saved ~0.5 s per intermediate hit, plus avoids unnecessary
     # memory.bin.zst staging on non-tail live layers).
     #
-    # The pending rebase is flushed before any miss (cached/incremental/
-    # ephemeral all need storage.qcow2 to be on the actual parent's qcow2
+    # The pending rebase is flushed before any miss (both cached and
+    # incremental need storage.qcow2 to be on the actual parent's qcow2
     # before the build runs) and at the chain end.
     local pending_path=""
 
@@ -259,8 +262,8 @@ snapshot_walk_chain() {
         kind=$(plugin_snapshot_kind "$plugin")
         key=$(run_hook "$plugin" "snapshot_key")
 
-        # Cache hit (cached + incremental only)
-        if [[ "$strategy" != "ephemeral" ]] && cache_path=$(snapshot_lookup "$plugin" "$key"); then
+        # Cache hit
+        if cache_path=$(snapshot_lookup "$plugin" "$key"); then
             # Defer the rebase — a subsequent consecutive hit will replace
             # this pending path; only the final hit (or pre-miss flush)
             # actually materialises in qemu-img + memory-dump cp work.
@@ -288,7 +291,6 @@ snapshot_walk_chain() {
         fi
         # For cached: VM is already on parent's qcow2 (rebased on previous
         # iteration's cache hit, or initial backing).
-        # For ephemeral: same — run on whatever the VM disk currently is.
 
         # We're about to boot the VM to run `snapshot_build` on top of the
         # parent's disk state. An earlier live ancestor's memory dump
@@ -304,13 +306,6 @@ snapshot_walk_chain() {
         local _build_t0=$SECONDS
         snapshot_walk_vm_boot "$vm"
         run_hook "$plugin" "snapshot_build" "$vm"
-
-        if [[ "$strategy" == "ephemeral" ]]; then
-            # No save, no stop — the layer's effects stay on the VM disk
-            # for whatever follows.
-            snapshot_stats_record_miss "$plugin" "$((SECONDS - _build_t0))"
-            continue
-        fi
 
         if [[ "$kind" == "live" ]]; then
             # Capture while running, then stop so the next iteration's
