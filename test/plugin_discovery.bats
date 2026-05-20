@@ -111,3 +111,66 @@ EOF
     assert_success
     assert_output "$PLUGIN_CORE_DIR/_base"
 }
+
+@test "discover_plugins iterates a colon-separated PLUGIN_USER_DIRS list" {
+    # Set up two distinct user dirs to compose.
+    local dir1="$BATS_TEST_TMPDIR/u1"
+    local dir2="$BATS_TEST_TMPDIR/u2"
+    mkdir -p "$dir1/plugin-a" "$dir2/plugin-b"
+    cat > "$dir1/plugin-a/plugin.toml" <<'EOF'
+description = "From dir1"
+EOF
+    cat > "$dir2/plugin-b/plugin.toml" <<'EOF'
+description = "From dir2"
+EOF
+
+    PLUGIN_USER_DIRS="$dir1:$dir2" run discover_plugins
+    assert_success
+    assert_line --index 0 "plugin-a"
+    assert_line --index 1 "plugin-b"
+}
+
+@test "plugin_dir resolves from any dir in PLUGIN_USER_DIRS, earlier wins" {
+    local dir1="$BATS_TEST_TMPDIR/u1"
+    local dir2="$BATS_TEST_TMPDIR/u2"
+    # Same plugin name in both dirs — dir1 listed first should win.
+    mkdir -p "$dir1/dup" "$dir2/dup"
+    cat > "$dir1/dup/plugin.toml" <<'EOF'
+description = "From dir1 (priority)"
+EOF
+    cat > "$dir2/dup/plugin.toml" <<'EOF'
+description = "From dir2 (overridden)"
+EOF
+
+    PLUGIN_USER_DIRS="$dir1:$dir2" run plugin_dir "dup"
+    assert_success
+    assert_output "$dir1/dup"
+}
+
+@test "PLUGIN_USER_DIRS empty entries are skipped" {
+    # ":dir::" style — leading / trailing / consecutive colons mustn't
+    # confuse discover_plugins into scanning $PWD or such.
+    local dir1="$BATS_TEST_TMPDIR/u1"
+    mkdir -p "$dir1/lonely"
+    cat > "$dir1/lonely/plugin.toml" <<'EOF'
+description = "Lonely"
+EOF
+
+    PLUGIN_USER_DIRS=":$dir1::" run discover_plugins
+    assert_success
+    assert_output "lonely"
+}
+
+@test "PLUGIN_USER_DIR singular form still works when PLUGIN_USER_DIRS unset" {
+    # Backward compatibility — every existing test (and every existing
+    # consumer) sets only PLUGIN_USER_DIR. Make sure we don't break it.
+    mkdir -p "$PLUGIN_USER_DIR/legacy"
+    cat > "$PLUGIN_USER_DIR/legacy/plugin.toml" <<'EOF'
+description = "Legacy via singular var"
+EOF
+
+    unset PLUGIN_USER_DIRS
+    run discover_plugins
+    assert_success
+    assert_output "legacy"
+}

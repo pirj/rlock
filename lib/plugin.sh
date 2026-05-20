@@ -1,9 +1,37 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Plugin directory paths — overridable for testing
+# Plugin directory paths — overridable for testing.
+#
+# PLUGIN_CORE_DIR:  framework-shipped plugins (single dir).
+# PLUGIN_USER_DIR:  user-installed plugins (single dir, ~/.config/rl/plugins
+#                   by default). Backward-compatible singular form.
+# PLUGIN_USER_DIRS: optional colon-separated *list* of user plugin dirs,
+#                   takes precedence over PLUGIN_USER_DIR when set. Lets
+#                   downstream consumers (bakeri.sh, ai.rlock) compose
+#                   project-local plugin directories alongside the
+#                   user-global one — e.g. PLUGIN_USER_DIRS=
+#                   "$HOME/.config/rl/plugins:$PWD/.bakerish/plugins" so
+#                   synthesised per-project plugins are discoverable
+#                   without rlock learning the downstream config files.
 PLUGIN_CORE_DIR="${PLUGIN_CORE_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../plugins" && pwd)}"
 PLUGIN_USER_DIR="${PLUGIN_USER_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/rl/plugins}"
+
+# Internal helper: print resolved user plugin dirs, one per line, in
+# priority order (first listed wins on name conflicts). Computed at
+# call time so tests / consumers can mutate the env between calls.
+_user_plugin_dirs() {
+    if [[ -n "${PLUGIN_USER_DIRS:-}" ]]; then
+        local saved_IFS=$IFS d
+        IFS=':'
+        for d in $PLUGIN_USER_DIRS; do
+            [[ -n "$d" ]] && echo "$d"
+        done
+        IFS=$saved_IFS
+    else
+        echo "$PLUGIN_USER_DIR"
+    fi
+}
 
 # Maximum plugin protocol version supported by this framework.
 PLUGIN_PROTOCOL_VERSION="1"
@@ -118,8 +146,11 @@ max_snapshot_memory() {
 # and are hidden from user-facing surfaces — they're auto-included by
 # the dispatcher rather than chosen by triggers or CLI args.
 discover_plugins() {
+    local -a dirs=("$PLUGIN_CORE_DIR")
+    local d
+    while IFS= read -r d; do dirs+=("$d"); done < <(_user_plugin_dirs)
     local dir plugin_dir_path name
-    for dir in "$PLUGIN_CORE_DIR" "$PLUGIN_USER_DIR"; do
+    for dir in "${dirs[@]}"; do
         [[ -d "$dir" ]] || continue
         for plugin_dir_path in "$dir"/*/; do
             [[ -f "${plugin_dir_path}plugin.toml" ]] || continue
@@ -131,17 +162,22 @@ discover_plugins() {
 }
 
 # Get the directory path for a named plugin.
-# User plugins take precedence over core plugins.
+# User plugins take precedence over core plugins; within the user list,
+# earlier PLUGIN_USER_DIRS entries win over later ones.
 # Returns 1 if plugin not found.
 plugin_dir() {
-    local name="$1"
-    if [[ -f "$PLUGIN_USER_DIR/$name/plugin.toml" ]]; then
-        echo "$PLUGIN_USER_DIR/$name"
-    elif [[ -f "$PLUGIN_CORE_DIR/$name/plugin.toml" ]]; then
+    local name="$1" dir
+    while IFS= read -r dir; do
+        if [[ -f "$dir/$name/plugin.toml" ]]; then
+            echo "$dir/$name"
+            return 0
+        fi
+    done < <(_user_plugin_dirs)
+    if [[ -f "$PLUGIN_CORE_DIR/$name/plugin.toml" ]]; then
         echo "$PLUGIN_CORE_DIR/$name"
-    else
-        return 1
+        return 0
     fi
+    return 1
 }
 
 # Internal helper: check if a value exists in a space-separated list.
