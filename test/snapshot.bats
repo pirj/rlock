@@ -234,7 +234,7 @@ M
     # Plugin declares snapshot_should_skip that always prints "skip".
     local name="p-skipper"
     export PLUGIN_CORE_DIR="$BATS_TEST_TMPDIR/core"
-    export PLUGIN_USER_DIR="$BATS_TEST_TMPDIR/user"
+    export RLOCK_PLUGIN_PATH="$BATS_TEST_TMPDIR/user"
     mkdir -p "$PLUGIN_CORE_DIR/$name"
     cat > "$PLUGIN_CORE_DIR/$name/plugin.toml" <<EOF
 description = "Skipping plugin"
@@ -266,7 +266,7 @@ SH
     # Plugin returns "go" (or empty) — should NOT skip.
     local name="p-go"
     export PLUGIN_CORE_DIR="$BATS_TEST_TMPDIR/core"
-    export PLUGIN_USER_DIR="$BATS_TEST_TMPDIR/user"
+    export RLOCK_PLUGIN_PATH="$BATS_TEST_TMPDIR/user"
     mkdir -p "$PLUGIN_CORE_DIR/$name"
     cat > "$PLUGIN_CORE_DIR/$name/plugin.toml" <<EOF
 description = "Non-skipping plugin"
@@ -340,7 +340,7 @@ _setup_fake_plugin() {
     # Args: name strategy key [kind]
     local name="$1" strategy="$2" key="$3" kind="${4:-cold}"
     export PLUGIN_CORE_DIR="$BATS_TEST_TMPDIR/core"
-    export PLUGIN_USER_DIR="$BATS_TEST_TMPDIR/user"
+    export RLOCK_PLUGIN_PATH="$BATS_TEST_TMPDIR/user"
     mkdir -p "$PLUGIN_CORE_DIR/$name"
     cat > "$PLUGIN_CORE_DIR/$name/plugin.toml" <<EOF
 description = "Fake $name"

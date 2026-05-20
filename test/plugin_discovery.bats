@@ -5,10 +5,12 @@ setup() {
     _common_setup
     source "$LIB_DIR/toml.sh"
 
-    # Override plugin dirs to use temp directories
+    # Override plugin dirs to use temp directories. RLOCK_PLUGIN_PATH is
+    # the only knob for "where to find user plugins"; single-entry list
+    # for the typical test pattern.
     PLUGIN_CORE_DIR="$BATS_TEST_TMPDIR/core_plugins"
-    PLUGIN_USER_DIR="$BATS_TEST_TMPDIR/user_plugins"
-    mkdir -p "$PLUGIN_CORE_DIR" "$PLUGIN_USER_DIR"
+    RLOCK_PLUGIN_PATH="$BATS_TEST_TMPDIR/user_plugins"
+    mkdir -p "$PLUGIN_CORE_DIR" "$RLOCK_PLUGIN_PATH"
 
     source "$LIB_DIR/plugin.sh"
 }
@@ -24,8 +26,8 @@ EOF
 }
 
 @test "discover_plugins finds user plugins" {
-    mkdir -p "$PLUGIN_USER_DIR/custom"
-    cat > "$PLUGIN_USER_DIR/custom/plugin.toml" <<'EOF'
+    mkdir -p "$RLOCK_PLUGIN_PATH/custom"
+    cat > "$RLOCK_PLUGIN_PATH/custom/plugin.toml" <<'EOF'
 description = "Custom plugin"
 EOF
     run discover_plugins
@@ -41,8 +43,8 @@ EOF
     cat > "$PLUGIN_CORE_DIR/auth-proxy/plugin.toml" <<'EOF'
 description = "Auth proxy"
 EOF
-    mkdir -p "$PLUGIN_USER_DIR/custom"
-    cat > "$PLUGIN_USER_DIR/custom/plugin.toml" <<'EOF'
+    mkdir -p "$RLOCK_PLUGIN_PATH/custom"
+    cat > "$RLOCK_PLUGIN_PATH/custom/plugin.toml" <<'EOF'
 description = "Custom"
 EOF
     run discover_plugins
@@ -71,16 +73,16 @@ EOF
 }
 
 @test "plugin_dir prefers user plugin over core" {
-    mkdir -p "$PLUGIN_CORE_DIR/git" "$PLUGIN_USER_DIR/git"
+    mkdir -p "$PLUGIN_CORE_DIR/git" "$RLOCK_PLUGIN_PATH/git"
     cat > "$PLUGIN_CORE_DIR/git/plugin.toml" <<'EOF'
 description = "Core git"
 EOF
-    cat > "$PLUGIN_USER_DIR/git/plugin.toml" <<'EOF'
+    cat > "$RLOCK_PLUGIN_PATH/git/plugin.toml" <<'EOF'
 description = "User git"
 EOF
     run plugin_dir "git"
     assert_success
-    assert_output "$PLUGIN_USER_DIR/git"
+    assert_output "$RLOCK_PLUGIN_PATH/git"
 }
 
 @test "plugin_dir fails for unknown plugin" {
@@ -112,7 +114,7 @@ EOF
     assert_output "$PLUGIN_CORE_DIR/_base"
 }
 
-@test "discover_plugins iterates a colon-separated PLUGIN_USER_DIRS list" {
+@test "discover_plugins iterates a colon-separated RLOCK_PLUGIN_PATH list" {
     # Set up two distinct user dirs to compose.
     local dir1="$BATS_TEST_TMPDIR/u1"
     local dir2="$BATS_TEST_TMPDIR/u2"
@@ -124,13 +126,13 @@ EOF
 description = "From dir2"
 EOF
 
-    PLUGIN_USER_DIRS="$dir1:$dir2" run discover_plugins
+    RLOCK_PLUGIN_PATH="$dir1:$dir2" run discover_plugins
     assert_success
     assert_line --index 0 "plugin-a"
     assert_line --index 1 "plugin-b"
 }
 
-@test "plugin_dir resolves from any dir in PLUGIN_USER_DIRS, earlier wins" {
+@test "plugin_dir resolves from any dir in RLOCK_PLUGIN_PATH, earlier wins" {
     local dir1="$BATS_TEST_TMPDIR/u1"
     local dir2="$BATS_TEST_TMPDIR/u2"
     # Same plugin name in both dirs — dir1 listed first should win.
@@ -142,12 +144,12 @@ EOF
 description = "From dir2 (overridden)"
 EOF
 
-    PLUGIN_USER_DIRS="$dir1:$dir2" run plugin_dir "dup"
+    RLOCK_PLUGIN_PATH="$dir1:$dir2" run plugin_dir "dup"
     assert_success
     assert_output "$dir1/dup"
 }
 
-@test "PLUGIN_USER_DIRS empty entries are skipped" {
+@test "RLOCK_PLUGIN_PATH empty entries are skipped" {
     # ":dir::" style — leading / trailing / consecutive colons mustn't
     # confuse discover_plugins into scanning $PWD or such.
     local dir1="$BATS_TEST_TMPDIR/u1"
@@ -156,21 +158,22 @@ EOF
 description = "Lonely"
 EOF
 
-    PLUGIN_USER_DIRS=":$dir1::" run discover_plugins
+    RLOCK_PLUGIN_PATH=":$dir1::" run discover_plugins
     assert_success
     assert_output "lonely"
 }
 
-@test "PLUGIN_USER_DIR singular form still works when PLUGIN_USER_DIRS unset" {
-    # Backward compatibility — every existing test (and every existing
-    # consumer) sets only PLUGIN_USER_DIR. Make sure we don't break it.
-    mkdir -p "$PLUGIN_USER_DIR/legacy"
-    cat > "$PLUGIN_USER_DIR/legacy/plugin.toml" <<'EOF'
-description = "Legacy via singular var"
+@test "RLOCK_PLUGIN_PATH defaults to ~/.config/rl/plugins when unset" {
+    # Simulate a fresh shell where the var is not set at all — the helper
+    # should fall back to XDG_CONFIG_HOME-or-HOME based default.
+    local fake_xdg="$BATS_TEST_TMPDIR/xdg"
+    mkdir -p "$fake_xdg/rl/plugins/defaulted"
+    cat > "$fake_xdg/rl/plugins/defaulted/plugin.toml" <<'EOF'
+description = "Picked up via XDG default"
 EOF
 
-    unset PLUGIN_USER_DIRS
-    run discover_plugins
+    unset RLOCK_PLUGIN_PATH
+    XDG_CONFIG_HOME="$fake_xdg" run discover_plugins
     assert_success
-    assert_output "legacy"
+    assert_output "defaulted"
 }

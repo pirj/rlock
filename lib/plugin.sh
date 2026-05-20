@@ -3,34 +3,32 @@ set -euo pipefail
 
 # Plugin directory paths — overridable for testing.
 #
-# PLUGIN_CORE_DIR:  framework-shipped plugins (single dir).
-# PLUGIN_USER_DIR:  user-installed plugins (single dir, ~/.config/rl/plugins
-#                   by default). Backward-compatible singular form.
-# PLUGIN_USER_DIRS: optional colon-separated *list* of user plugin dirs,
-#                   takes precedence over PLUGIN_USER_DIR when set. Lets
-#                   downstream consumers (bakeri.sh, ai.rlock) compose
-#                   project-local plugin directories alongside the
-#                   user-global one — e.g. PLUGIN_USER_DIRS=
-#                   "$HOME/.config/rl/plugins:$PWD/.bakerish/plugins" so
-#                   synthesised per-project plugins are discoverable
-#                   without rlock learning the downstream config files.
+# PLUGIN_CORE_DIR:   framework-shipped plugins (single dir,
+#                    rlock/plugins/). Internal — devs editing rlock
+#                    itself care; downstream consumers don't.
+# RLOCK_PLUGIN_PATH: colon-separated PATH-like list of plugin directories
+#                    discoverable to `rl new` / `discover_plugins` /
+#                    `plugin_dir`. Default when unset:
+#                    ~/.config/rl/plugins. Earlier entries win on name
+#                    conflicts (same precedence semantics as shell PATH).
+#                    Downstream consumers compose by prepending their
+#                    own dirs — e.g. bakeri.sh does
+#                    RLOCK_PLUGIN_PATH="$PWD/.bakerish/plugins:$HOME/.config/rl/plugins"
+#                    so synthesised per-project plugins are discoverable
+#                    without rlock learning the downstream config files.
 PLUGIN_CORE_DIR="${PLUGIN_CORE_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../plugins" && pwd)}"
-PLUGIN_USER_DIR="${PLUGIN_USER_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/rl/plugins}"
 
-# Internal helper: print resolved user plugin dirs, one per line, in
-# priority order (first listed wins on name conflicts). Computed at
+# Internal helper: print resolved RLOCK_PLUGIN_PATH entries, one per
+# line, in priority order (first wins on name conflicts). Computed at
 # call time so tests / consumers can mutate the env between calls.
-_user_plugin_dirs() {
-    if [[ -n "${PLUGIN_USER_DIRS:-}" ]]; then
-        local saved_IFS=$IFS d
-        IFS=':'
-        for d in $PLUGIN_USER_DIRS; do
-            [[ -n "$d" ]] && echo "$d"
-        done
-        IFS=$saved_IFS
-    else
-        echo "$PLUGIN_USER_DIR"
-    fi
+_rlock_plugin_path() {
+    local raw="${RLOCK_PLUGIN_PATH:-${XDG_CONFIG_HOME:-$HOME/.config}/rl/plugins}"
+    local saved_IFS=$IFS d
+    IFS=':'
+    for d in $raw; do
+        [[ -n "$d" ]] && echo "$d"
+    done
+    IFS=$saved_IFS
 }
 
 # Maximum plugin protocol version supported by this framework.
@@ -148,7 +146,7 @@ max_snapshot_memory() {
 discover_plugins() {
     local -a dirs=("$PLUGIN_CORE_DIR")
     local d
-    while IFS= read -r d; do dirs+=("$d"); done < <(_user_plugin_dirs)
+    while IFS= read -r d; do dirs+=("$d"); done < <(_rlock_plugin_path)
     local dir plugin_dir_path name
     for dir in "${dirs[@]}"; do
         [[ -d "$dir" ]] || continue
@@ -162,8 +160,8 @@ discover_plugins() {
 }
 
 # Get the directory path for a named plugin.
-# User plugins take precedence over core plugins; within the user list,
-# earlier PLUGIN_USER_DIRS entries win over later ones.
+# RLOCK_PLUGIN_PATH entries take precedence over the core dir; within
+# RLOCK_PLUGIN_PATH, earlier entries win over later ones.
 # Returns 1 if plugin not found.
 plugin_dir() {
     local name="$1" dir
@@ -172,7 +170,7 @@ plugin_dir() {
             echo "$dir/$name"
             return 0
         fi
-    done < <(_user_plugin_dirs)
+    done < <(_rlock_plugin_path)
     if [[ -f "$PLUGIN_CORE_DIR/$name/plugin.toml" ]]; then
         echo "$PLUGIN_CORE_DIR/$name"
         return 0

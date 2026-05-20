@@ -39,7 +39,7 @@ The interesting use cases live in separate repos that depend on this framework:
 └───────────────────────────────────────────────────────────┘
 ```
 
-A plugin pack adds plugins to `PLUGIN_USER_DIR` (default `~/.config/rl/plugins`). The framework discovers them at `rl new`, resolves their dependencies, walks the snapshot chain, and runs their hooks.
+A plugin pack adds plugins to a directory on `RLOCK_PLUGIN_PATH` (colon-separated, like shell `PATH`; defaults to `~/.config/rl/plugins`). The framework discovers them at `rl new`, resolves their dependencies, walks the snapshot chain, and runs their hooks.
 
 ## Commands
 
@@ -69,7 +69,7 @@ A plugin pack may add more (Caddy for `auth-proxy`, `yq`/`jq` for compose, etc.)
 git clone git@github.com:pirj/rlock.git
 git clone git@github.com:pirj/ai.rlock.git
 export PATH="$PWD/rlock/bin:$PATH"
-export PLUGIN_USER_DIR="$PWD/ai.rlock/plugins"
+export RLOCK_PLUGIN_PATH="$PWD/ai.rlock/plugins"
 
 cd your-project
 rl new

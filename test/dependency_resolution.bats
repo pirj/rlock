@@ -5,8 +5,8 @@ setup() {
     _common_setup
 
     PLUGIN_CORE_DIR="$BATS_TEST_TMPDIR/core_plugins"
-    PLUGIN_USER_DIR="$BATS_TEST_TMPDIR/user_plugins"
-    mkdir -p "$PLUGIN_CORE_DIR" "$PLUGIN_USER_DIR"
+    RLOCK_PLUGIN_PATH="$BATS_TEST_TMPDIR/user_plugins"
+    mkdir -p "$PLUGIN_CORE_DIR" "$RLOCK_PLUGIN_PATH"
 
     source "$LIB_DIR/toml.sh"
     source "$LIB_DIR/plugin.sh"
