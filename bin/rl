@@ -392,16 +392,20 @@ case "${1:-help}" in
     cache)  shift; cmd_cache "$@" ;;
     help|--help|-h) cmd_help ;;
     *)
-        # Try plugin command dispatch.
-        # Read plugins without process substitution to preserve stdin (terminal).
+        # Try plugin command dispatch. dispatch_command does a two-pass
+        # lookup: first ACTIVE_PLUGINS (= what `.rl/plugins` reports for
+        # the current project), then all DISCOVERABLE plugins as
+        # fallback for command-only plugins like bake-run / bake-cache
+        # that don't need to be in the active chain. We always invoke
+        # it — even with an empty ACTIVE_PLUGINS — so pass 2 runs and
+        # the command-only fallback path works in a fresh project dir
+        # before `rl new` has ever run.
+        # Read plugins without process substitution to preserve stdin
+        # (terminal).
         _active_plugins=""
         if [[ -f "$RL_DIR/plugins" ]]; then
             _active_plugins=$(tr '\n' ' ' < "$RL_DIR/plugins")
         fi
-        if [[ -n "$_active_plugins" ]]; then
-            ACTIVE_PLUGINS="$_active_plugins" dispatch_command "$@"
-        else
-            die "Unknown command: $1. Run 'rl help' for usage."
-        fi
+        ACTIVE_PLUGINS="$_active_plugins" dispatch_command "$@"
         ;;
 esac
