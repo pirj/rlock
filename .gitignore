@@ -1,3 +1,19 @@
-idea.md
+# OS
+.DS_Store
+
+# Editor
+*.swp
+*~
+.idea/
+.vscode/
+
+# AI assistant working files
 .claude
+.aider*
+
+# Project-local state produced by `rl new`
 .rl/
+.bakerish/
+
+# Personal scratchpad (not for the repo)
+idea.md
