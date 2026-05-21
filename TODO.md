@@ -178,3 +178,29 @@ Cross-references the "aq integration to skip first-boot setup" TODO
 above — same problem from a different angle. Sequence the work after we
 measure where the 30 s warm boot actually spends its time on each layer
 (see "Snapshot analytics" TODO).
+
+CI: wire `integration_layered.sh` into the bats suite.
+ - The integration script (test/integration_layered.sh) verifies the
+   full snapshot chain with a real VM. Currently runs manually only.
+ - Plumb it as a separate bats target (e.g. `bats test/integration/`)
+   that the user can opt into with a flag, skipping by default to
+   keep `bats test/` fast.
+ - Needs a way to detect "are we on a host that can boot a VM?" so
+   CI skips on linux-without-kvm and macOS-without-HVF runners.
+
+End-to-end `cmd_new` smoke test in CI.
+ - Validate the "sub-second warm" claim against a fresh runner.
+ - Could reuse rails-pg-sample fixture from bakeri.sh.
+ - Asserts warm walk_chain ≤ N seconds (some generous bound — bench
+   shows 2.7 s typical).
+ - Useful as a regression detector for changes to walk_chain /
+   `cmd_new` boot ordering.
+
+Explicit `--memory=1G` passed to `aq new` when no plugin declares.
+ - Today `cmd_new` only passes `--memory=NG` when `max_snapshot_memory`
+   returns non-empty. When all active plugins omit `[snapshot] memory`,
+   aq falls back to its own default (1G). That's correct but
+   non-obvious — `aq inspect` doesn't show explicit memory.
+ - Make it explicit: always pass `--memory` to aq new, even if it's
+   the same as aq's default. Helps debuggability and surfaces the
+   value in `.memory` markers for downstream tooling.
