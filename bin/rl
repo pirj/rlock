@@ -37,15 +37,24 @@ cmd_new() {
     #                  computation (passed straight to aq new --memory).
     #                  Stripping any trailing G so both "4" and "4G"
     #                  are accepted.
+    # --size=<N|NG>    Override the disk size for the new VM (passed
+    #                  straight to aq new --size). Defaults to 16G —
+    #                  generous for arbitrary CI workloads but
+    #                  wasteful for small projects; set this when the
+    #                  workload is bounded (e.g. bakerish.toml's
+    #                  [disk] size for a postgres-only fixture).
     # --name=<vm-name> Override the default VM name (basename of cwd).
     #                  Used by `bake run --vm-suffix` to create per-
     #                  shard VMs from a single project dir.
     local memory_override=""
+    local size_override=""
     local name_override=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --memory=*) memory_override="${1#--memory=}"; shift ;;
             --memory)   memory_override="${2:-}"; shift 2 ;;
+            --size=*)   size_override="${1#--size=}"; shift ;;
+            --size)     size_override="${2:-}"; shift 2 ;;
             --name=*)   name_override="${1#--name=}"; shift ;;
             --name)     name_override="${2:-}"; shift 2 ;;
             --)         shift; break ;;
@@ -131,7 +140,9 @@ cmd_new() {
     #      (notably docker-compose with kind = "live") declare it; the
     #      framework picks the max.
     #   3. unset (= aq's own 1G default).
-    local -a aq_new_args=("--size=16G")
+    local _size="${size_override:-16}"
+    _size="${_size%G}"
+    local -a aq_new_args=("--size=${_size}G")
     local _mem=""
     if [[ -n "$memory_override" ]]; then
         _mem="${memory_override%G}"

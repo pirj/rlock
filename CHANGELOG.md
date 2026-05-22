@@ -6,6 +6,20 @@ All notable changes to rlock — one-liner per change. Date-stamped releases gro
 
 - (nothing pending)
 
+## v0.1.1 — 2026-05-23
+
+### `rl new --size=NG`
+
+Accept `--size=<N|NG>` to override `aq new --size`. Default remains
+`16G` — generous for arbitrary CI workloads — but small projects
+can now drop to `4G`–`8G` via `bake run` reading `[disk] size` from
+`bakerish.toml` (which threads it through as this flag).
+
+- `cmd_new`: parse `--size` alongside `--memory`; strip optional
+  trailing `G`. Default unchanged at `16G`.
+- Use in conjunction with bakeri.sh v0.1.2's `[disk] size` field
+  to declare a project-wide preference.
+
 ## v0.1.0 — 2026-05-21
 
 Initial public release. Plugin protocol, snapshot chain, the lot.
