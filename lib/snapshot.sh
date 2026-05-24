@@ -211,6 +211,20 @@ snapshot_walk_chain() {
     local vm="$1"; shift
     local parent_plugin="" parent_key="" parent_path=""
 
+    # Once any layer in the chain (cache-hit or freshly-built) is live,
+    # ALL subsequent layers are force-promoted to live. Building a cold
+    # layer on top of a live ancestor requires a cold-reboot of the VM
+    # for snapshot_build, which loses any ambient services started by
+    # the live ancestor (running postgres, warm dockerd, redis page
+    # cache, ...) — and worse, side effects of that cold boot (rc-update
+    # auto-starting services to a different on-disk state) create a
+    # memory↔disk inconsistency at the final live restore. Promotion
+    # keeps the VM live-restored throughout the chain so each layer's
+    # build sees the cumulative running state and captures it. Storage
+    # cost is bounded by TTL-based GC and the opt-in zstd --patch-from
+    # mode (see aq's ROADMAP).
+    local chain_has_live=0
+
     # Each iteration may rebase the VM disk; the VM must be stopped first.
     snapshot_walk_vm_stop "$vm"
 
@@ -258,15 +272,37 @@ snapshot_walk_chain() {
         kind=$(plugin_snapshot_kind "$plugin")
         key=$(run_hook "$plugin" "snapshot_key")
 
-        # Cache hit
+        # Promote to live once the chain has gone live.
+        if [[ $chain_has_live -eq 1 ]]; then
+            kind="live"
+        fi
+
+        # Cache lookup. We treat a cold-kind cache hit as STALE when the
+        # chain has already gone live — the cold entry's recipe ran on
+        # a cold-booted VM in some previous walk, and its disk state
+        # reflects services restarted by rc-update during that boot.
+        # Restoring our cumulative live memory on top of that disk is
+        # exactly the inconsistency live-promotion exists to avoid.
+        # Fall through to the miss path to rebuild as live.
         if cache_path=$(snapshot_lookup "$plugin" "$key"); then
-            # Defer the rebase — a subsequent consecutive hit will replace
-            # this pending path; only the final hit (or pre-miss flush)
-            # actually materialises in qemu-img + memory-dump cp work.
-            snapshot_stats_record_hit "$plugin"
-            pending_path="$cache_path"
-            parent_plugin="$plugin"; parent_key="$key"; parent_path="$cache_path"
-            continue
+            local cached_kind
+            cached_kind=$(snapshot_entry_kind "$cache_path")
+            if [[ $chain_has_live -eq 1 && "$cached_kind" == "cold" ]]; then
+                : # fall through to miss
+            else
+                # Defer the rebase — a subsequent consecutive hit will replace
+                # this pending path; only the final hit (or pre-miss flush)
+                # actually materialises in qemu-img + memory-dump cp work.
+                snapshot_stats_record_hit "$plugin"
+                pending_path="$cache_path"
+                parent_plugin="$plugin"; parent_key="$key"; parent_path="$cache_path"
+                # Sticky live: a cached live entry means everything downstream
+                # builds on its running state.
+                if [[ "$cached_kind" == "live" ]]; then
+                    chain_has_live=1
+                fi
+                continue
+            fi
         fi
 
         # Miss path begins. Materialise any deferred cache-hit rebase
@@ -288,12 +324,24 @@ snapshot_walk_chain() {
         # For cached: VM is already on parent's qcow2 (rebased on previous
         # iteration's cache hit, or initial backing).
 
-        # We're about to boot the VM to run `snapshot_build` on top of the
-        # parent's disk state. An earlier live ancestor's memory dump
-        # (.bin or .bin.zst) would resume mid-flight; we don't want that
-        # during a build (the build expects a clean cold boot at the new
-        # disk content). Clear both forms for this iteration.
-        rm -f "$_vm_dir/incoming-memory.bin" "$_vm_dir/incoming-memory.bin.zst"
+        # We're about to boot the VM to run `snapshot_build` on top of
+        # the parent's disk state.
+        #
+        # Before live-promotion: we cleared incoming-memory.bin so the
+        # build would cold-boot cleanly at the new disk content. That
+        # turned out to be exactly the source of memory↔disk drift —
+        # cold-booting a VM whose disk has services in "stopped" state
+        # (because a previous cold rebuild walked through with services
+        # restarted by rc-update) doesn't actually match the cached
+        # live memory.
+        #
+        # Now: if any layer in the chain is live, we KEEP the staged
+        # incoming-memory.bin so this build is live-restored from the
+        # most recent live ancestor. The build sees the cumulative
+        # running state and captures it (forced kind=live above).
+        if [[ $chain_has_live -eq 0 ]]; then
+            rm -f "$_vm_dir/incoming-memory.bin" "$_vm_dir/incoming-memory.bin.zst"
+        fi
 
         # Time the miss-path build for snapshot_stats. SECONDS is a bash
         # builtin counting whole seconds since shell start — second-level
@@ -308,6 +356,7 @@ snapshot_walk_chain() {
             # rebase has a clean disk file.
             snapshot_save "$vm" "$plugin" "$key" "live" "$parent_plugin" "$parent_key"
             snapshot_walk_vm_stop "$vm"
+            chain_has_live=1
         else
             # Cold capture: must stop first so qemu-img convert sees a
             # consistent disk.

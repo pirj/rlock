@@ -6,6 +6,40 @@ All notable changes to rlock — one-liner per change. Date-stamped releases gro
 
 - (nothing pending)
 
+## v0.1.2 — 2026-05-24
+
+### "After live → all live" rule in snapshot_walk_chain
+
+Once any layer in the chain (cache-hit or freshly-built) is live,
+all subsequent layers are force-promoted to live. Previously, a
+cold layer on top of a live ancestor required a cold-reboot of the
+VM for the build, which:
+- Lost any ambient services started by the live ancestor (running
+  postgres, warm dockerd, redis page cache).
+- Triggered rc-update to auto-start services to a different on-disk
+  state, creating a memory↔disk inconsistency at the final restore.
+
+The fix: promotion keeps the VM live-restored throughout the chain
+so each layer's `snapshot_build` sees the cumulative running state
+and captures it. Storage cost is bounded by TTL-based GC and the
+opt-in `zstd --patch-from` mode (see aq's ROADMAP).
+
+- `snapshot_walk_chain`: track `chain_has_live` flag. Force
+  `kind=live` for all layers downstream of the first live one.
+- Cache hits that lookup a cold entry under a live-promoted chain
+  are treated as stale (fall through to miss path and rebuild as
+  live).
+- Live-promoted misses keep `incoming-memory.bin` staged for the
+  build VM so it boots live-restored (previously cleared).
+
+Surfaced by `pirj/bakerish-rails-pg-example` CI: docker-compose
+captured postgres live, then the cold git + prebuild layers
+clobbered docker daemon state during their cold-rebuild boots; the
+final restore saw memory saying "postgres running" but disk saying
+"all containers stopped" → `docker compose exec db` reported
+service not running. Promotion eliminates the cold-reboot in
+between.
+
 ## v0.1.1 — 2026-05-23
 
 ### `rl new --size=NG`
