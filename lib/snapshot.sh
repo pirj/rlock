@@ -357,6 +357,15 @@ snapshot_walk_chain() {
             snapshot_save "$vm" "$plugin" "$key" "live" "$parent_plugin" "$parent_key"
             snapshot_walk_vm_stop "$vm"
             chain_has_live=1
+            # snapshot_save deposits memory.bin[.zst] into the cache
+            # dir but doesn't stage it into $_vm_dir. The next layer's
+            # build VM would then cold-boot from its own dirty
+            # storage.qcow2 (build mutations baked in, no memory) and
+            # lose the running state we just captured. Re-rebase to
+            # the just-saved entry: snapshot_walk_vm_rebase picks up
+            # the live-kind meta and copies memory.bin[.zst] into the
+            # vm_dir as incoming-memory.bin[.zst] for the next boot.
+            snapshot_walk_vm_rebase "$vm" "$(snapshot_cache_path "$plugin" "$key")"
         else
             # Cold capture: must stop first so qemu-img convert sees a
             # consistent disk.

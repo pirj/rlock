@@ -6,6 +6,22 @@ All notable changes to rlock — one-liner per change. Date-stamped releases gro
 
 - (nothing pending)
 
+## v0.1.3 — 2026-05-24
+
+### Stage memory.bin to vm_dir after a live miss save
+
+v0.1.2's live-promotion rule was incomplete: `snapshot_save` deposits
+`memory.bin[.zst]` into the cache dir but didn't stage it into
+`$_vm_dir`, so the NEXT layer's miss-path build still cold-booted
+from its own dirty storage.qcow2 (build mutations baked in, no
+memory) and lost the running state we just captured.
+
+- After a live `snapshot_save`, re-rebase storage.qcow2 onto the
+  just-saved cache entry via `snapshot_walk_vm_rebase`. That copies
+  `memory.bin[.zst]` from the cache dir into `$_vm_dir` as
+  `incoming-memory.bin[.zst]` for the next boot, exactly like cache
+  hits do.
+
 ## v0.1.2 — 2026-05-24
 
 ### "After live → all live" rule in snapshot_walk_chain
