@@ -177,7 +177,7 @@ snapshot_walk_vm_rebase() {
     snapshot_rebase "$disk" "$backing"
 
     kind=$(snapshot_entry_kind "$backing")
-    stderr "  rebase: backing=$backing kind=$kind"
+    echo "  rebase: backing=$backing kind=$kind" >&2
     if [[ "$kind" == "live" ]]; then
         cache_dir=$(dirname "$backing")
         # Always clear BOTH forms so a previous layer's incoming doesn't
@@ -185,12 +185,12 @@ snapshot_walk_vm_rebase() {
         rm -f "$vm_dir/incoming-memory.bin" "$vm_dir/incoming-memory.bin.zst"
         if [[ -f "$cache_dir/memory.bin.zst" ]]; then
             cp "$cache_dir/memory.bin.zst" "$vm_dir/incoming-memory.bin.zst"
-            stderr "  staged: $cache_dir/memory.bin.zst -> $vm_dir/incoming-memory.bin.zst ($(stat -c%s "$vm_dir/incoming-memory.bin.zst" 2>/dev/null) B)"
+            echo "  staged: $cache_dir/memory.bin.zst -> $vm_dir/incoming-memory.bin.zst ($(stat -c%s "$vm_dir/incoming-memory.bin.zst" 2>/dev/null) B)" >&2
         elif [[ -f "$cache_dir/memory.bin" ]]; then
             cp "$cache_dir/memory.bin" "$vm_dir/incoming-memory.bin"
-            stderr "  staged: $cache_dir/memory.bin -> $vm_dir/incoming-memory.bin"
+            echo "  staged: $cache_dir/memory.bin -> $vm_dir/incoming-memory.bin" >&2
         else
-            stderr "  WARN: kind=live but no memory.bin[.zst] in $cache_dir"
+            echo "  WARN: kind=live but no memory.bin[.zst] in $cache_dir" >&2
         fi
     fi
     # kind=cold: leave any existing incoming-memory.bin / .zst in place.
