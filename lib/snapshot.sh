@@ -88,20 +88,22 @@ snapshot_save() {
             # are recognised by snapshot_walk_vm_rebase on restore.
             local tag="__rl_cache_${plugin}_${key:0:32}_$$"
 
-            # B5 opt-in: when AQ_MEMORY_PATCH_MODE=1 and the parent layer
-            # is also a live entry with memory state, tell aq to emit a
-            # zstd patch against the parent's memory instead of a full
-            # compression. ~95% disk saving when most memory pages are
-            # unchanged across layers (typical for plugin chains that
-            # extend an already-running stack). Restore is single-thread
-            # chain reconstruction — slower than direct decompression,
-            # but acceptable when disk is the binding constraint (CI
-            # cache pushes, OCI transport).
+            # B5 opt-in: when the user runs with AQ_MEMORY_SNAPSHOT=zstd-patch
+            # and the parent layer is also a live entry with memory state,
+            # pass the parent's memory.bin.zst path to aq via
+            # AQ_PARENT_MEMORY_ZST so aq emits a zstd --patch-from delta
+            # instead of a full compression. ~95% disk saving when most
+            # memory pages are unchanged across layers (typical for plugin
+            # chains that extend an already-running stack). Restore is
+            # single-thread chain reconstruction (see _snapshot_reconstruct_memory_chain
+            # below) — slower than direct decompression, but acceptable
+            # when disk is the binding constraint (CI cache pushes, OCI
+            # transport).
             local _patch_env=()
-            if [[ "${AQ_MEMORY_PATCH_MODE:-}" == "1" && -n "$parent_plugin" && -n "$parent_key" ]]; then
+            if [[ "${AQ_MEMORY_SNAPSHOT:-}" == "zstd-patch" && -n "$parent_plugin" && -n "$parent_key" ]]; then
                 local _parent_mem="$RL_CACHE_DIR/$parent_plugin/$parent_key/memory.bin.zst"
                 if [[ -f "$_parent_mem" ]]; then
-                    _patch_env=(env "AQ_PARENT_MEMORY_ZST=$_parent_mem" "AQ_MEMORY_PATCH_MODE=1")
+                    _patch_env=(env "AQ_PARENT_MEMORY_ZST=$_parent_mem" "AQ_MEMORY_SNAPSHOT=zstd-patch")
                 fi
             fi
 

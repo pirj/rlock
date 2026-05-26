@@ -6,6 +6,27 @@ All notable changes to rlock — one-liner per change. Date-stamped releases gro
 
 - (nothing pending)
 
+## v0.1.7 — 2026-05-27
+
+### Switch from AQ_MEMORY_PATCH_MODE to AQ_MEMORY_SNAPSHOT enum
+
+Pairs with aq v2.5.35's enum refactor. `snapshot_save` (live
+kind) now passes `AQ_MEMORY_SNAPSHOT=zstd-patch` (plus the
+existing `AQ_PARENT_MEMORY_ZST=<path>`) to `aq snapshot create`
+when the caller set `AQ_MEMORY_SNAPSHOT=zstd-patch` in the
+environment and the parent layer is a live cache entry with a
+memory.bin.zst.
+
+Breaking change in lockstep with aq v2.5.35:
+- old: caller sets `AQ_MEMORY_PATCH_MODE=1`; rlock passes that flag through
+- new: caller sets `AQ_MEMORY_SNAPSHOT=zstd-patch`; rlock passes it through
+
+Requires aq ≥ v2.5.35. Older aq won't recognise the new env
+var and silently ignores it, producing plain pzstd output.
+Restore-side chain reconstruction is unchanged from v0.1.6 —
+detection is based on the on-disk `memory.bin.zstpatch` file
+shape, not on env vars.
+
 ## v0.1.6 — 2026-05-27
 
 ### B5 wiring — zstd --patch-from for stacked live layers (opt-in)
