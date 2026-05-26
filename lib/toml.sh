@@ -20,11 +20,44 @@ set -euo pipefail
 # `lib/plugin.sh` instead.
 # ---------------------------------------------------------------------
 
+# In-process TOML cache. File path → file content. Populated by
+# `toml_prefetch` from the parent shell before hot loops; subshells
+# spawned by `$(...)` inherit the array and use bash builtin parsing
+# instead of forking sed/awk on every lookup. Cache misses fall through
+# to the original sed/awk implementation, so behaviour is unchanged
+# when prefetch is skipped.
+declare -gA _TOML_CACHE 2>/dev/null || true
+
+# Slurp the given TOML files into the in-process cache. Call from the
+# parent shell BEFORE entering hot loops where multiple `toml_get*` calls
+# will be made via subshells. Writes from subshells don't propagate back
+# to the parent, so prefetch is the only way to make caching effective
+# across `$(...)` boundaries.
+# Usage: toml_prefetch file1 [file2 ...]
+toml_prefetch() {
+    local f
+    for f in "$@"; do
+        [[ -f "$f" ]] || continue
+        [[ -n "${_TOML_CACHE[$f]+x}" ]] && continue
+        _TOML_CACHE[$f]=$(<"$f")
+    done
+}
+
 # Parse a string value from a flat TOML file.
 # Usage: toml_get file key
 # Prints the value (unquoted) or empty string if key not found.
 toml_get() {
     local file="$1" key="$2"
+    if [[ -n "${_TOML_CACHE[$file]+x}" ]]; then
+        local line
+        while IFS= read -r line; do
+            if [[ "$line" =~ ^${key}[[:space:]]*=[[:space:]]*\"(.*)\"[[:space:]]*$ ]]; then
+                printf '%s\n' "${BASH_REMATCH[1]}"
+                return 0
+            fi
+        done <<< "${_TOML_CACHE[$file]}"
+        return 0
+    fi
     sed -n "s/^${key} *= *\"\(.*\)\"/\1/p" "$file"
 }
 
@@ -33,6 +66,21 @@ toml_get() {
 # Prints one element per line. Empty output if key missing or array empty.
 toml_get_array() {
     local file="$1" key="$2"
+    if [[ -n "${_TOML_CACHE[$file]+x}" ]]; then
+        local line items i
+        while IFS= read -r line; do
+            if [[ "$line" =~ ^${key}[[:space:]]*=[[:space:]]*\[(.*)\][[:space:]]*$ ]]; then
+                IFS=',' read -ra items <<< "${BASH_REMATCH[1]}"
+                for i in "${items[@]}"; do
+                    if [[ "$i" =~ \"([^\"]*)\" ]]; then
+                        printf '%s\n' "${BASH_REMATCH[1]}"
+                    fi
+                done
+                return 0
+            fi
+        done <<< "${_TOML_CACHE[$file]}"
+        return 0
+    fi
     local line
     line=$(grep "^${key} *= *\[" "$file" 2>/dev/null) || return 0
     echo "$line" | sed 's/^[^[]*\[//; s/\].*//' | tr ',' '\n' | sed -n 's/.*"\([^"]*\)".*/\1/p'
@@ -43,6 +91,18 @@ toml_get_array() {
 # Prints the value (unquoted) or empty string if section/key not found.
 toml_get_in_section() {
     local file="$1" section="$2" key="$3"
+    if [[ -n "${_TOML_CACHE[$file]+x}" ]]; then
+        local line in_sec=0
+        while IFS= read -r line; do
+            if [[ "$line" == "[$section]" ]]; then in_sec=1; continue; fi
+            if [[ "$line" =~ ^\[ ]]; then in_sec=0; continue; fi
+            if [[ $in_sec -eq 1 && "$line" =~ ^${key}[[:space:]]*=[[:space:]]*\"(.*)\"[[:space:]]*$ ]]; then
+                printf '%s\n' "${BASH_REMATCH[1]}"
+                return 0
+            fi
+        done <<< "${_TOML_CACHE[$file]}"
+        return 0
+    fi
     awk -v sec="[$section]" -v k="$key" '
         $0 == sec { in_sec = 1; next }
         /^\[/     { in_sec = 0; next }
@@ -62,6 +122,23 @@ toml_get_in_section() {
 # everywhere.
 toml_get_array_in_section() {
     local file="$1" section="$2" key="$3"
+    if [[ -n "${_TOML_CACHE[$file]+x}" ]]; then
+        local line in_sec=0 items i
+        while IFS= read -r line; do
+            if [[ "$line" == "[$section]" ]]; then in_sec=1; continue; fi
+            if [[ "$line" =~ ^\[ ]]; then in_sec=0; continue; fi
+            if [[ $in_sec -eq 1 && "$line" =~ ^${key}[[:space:]]*=[[:space:]]*\[(.*)\][[:space:]]*$ ]]; then
+                IFS=',' read -ra items <<< "${BASH_REMATCH[1]}"
+                for i in "${items[@]}"; do
+                    if [[ "$i" =~ \"([^\"]*)\" ]]; then
+                        printf '%s\n' "${BASH_REMATCH[1]}"
+                    fi
+                done
+                return 0
+            fi
+        done <<< "${_TOML_CACHE[$file]}"
+        return 0
+    fi
     awk -v sec="[$section]" -v k="$key" '
         $0 == sec { in_sec = 1; next }
         /^\[/     { in_sec = 0; next }

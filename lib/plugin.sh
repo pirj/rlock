@@ -34,6 +34,43 @@ _rlock_plugin_path() {
 # Maximum plugin protocol version supported by this framework.
 PLUGIN_PROTOCOL_VERSION="1"
 
+# In-process plugin-dir cache. plugin name → dir path. Populated by
+# `plugin_meta_prefetch` from the parent shell so that subsequent
+# `plugin_dir` calls in `$(...)` subshells hit the cache instead of
+# re-iterating RLOCK_PLUGIN_PATH on every lookup. As with `_TOML_CACHE`
+# in `toml.sh`, writes from subshells don't propagate to the parent,
+# so prefetch must run in the parent (or whichever ancestor shell
+# initiates the hot loop).
+declare -gA _PLUGIN_DIR_CACHE 2>/dev/null || true
+
+# Walk RLOCK_PLUGIN_PATH + PLUGIN_CORE_DIR once, populating
+# _PLUGIN_DIR_CACHE (plugin → dir) and _TOML_CACHE (plugin.toml path →
+# file content). Use before entering a hot loop that will call
+# `plugin_dir` / `toml_get*` for many plugins via `$(...)`.
+#
+# Cheap and idempotent: skips entries already in _PLUGIN_DIR_CACHE. ~1
+# ms/plugin on M3 (file slurp dominates), so a 13-plugin prefetch costs
+# ~13 ms once per process — vs ~120 ms of cumulative sed/awk forks if
+# every later call hits disk.
+plugin_meta_prefetch() {
+    local -a dirs=("$PLUGIN_CORE_DIR")
+    local d
+    while IFS= read -r d; do dirs+=("$d"); done < <(_rlock_plugin_path)
+    local dir plugin_dir_path name
+    # Earliest entry wins (matches plugin_dir semantics). Iterate forward
+    # but only insert when not yet cached.
+    for dir in "${dirs[@]}"; do
+        [[ -d "$dir" ]] || continue
+        for plugin_dir_path in "$dir"/*/; do
+            [[ -f "${plugin_dir_path}plugin.toml" ]] || continue
+            name=$(basename "$plugin_dir_path")
+            [[ -n "${_PLUGIN_DIR_CACHE[$name]:-}" ]] && continue
+            _PLUGIN_DIR_CACHE[$name]="${plugin_dir_path%/}"
+            toml_prefetch "${plugin_dir_path}plugin.toml"
+        done
+    done
+}
+
 # Print the protocol version declared by a plugin, or "1" if unset.
 plugin_protocol_version() {
     local plugin="$1"
@@ -164,7 +201,12 @@ discover_plugins() {
 # RLOCK_PLUGIN_PATH, earlier entries win over later ones.
 # Returns 1 if plugin not found.
 plugin_dir() {
-    local name="$1" dir
+    local name="$1"
+    if [[ -n "${_PLUGIN_DIR_CACHE[$name]:-}" ]]; then
+        printf '%s\n' "${_PLUGIN_DIR_CACHE[$name]}"
+        return 0
+    fi
+    local dir
     while IFS= read -r dir; do
         if [[ -f "$dir/$name/plugin.toml" ]]; then
             echo "$dir/$name"
@@ -293,6 +335,13 @@ detect_triggers() {
     local project_dir="$1"
     shift
     local -a available=("$@")
+
+    # Slurp all plugin manifests into the in-process cache once. The loop
+    # below makes 3-4 TOML lookups per plugin via subshells; without the
+    # prefetch, each one forks sed/awk. With it, subshells inherit the
+    # cache and parse from string via bash builtins. Measured ~80 ms
+    # save with 13 plugins on M3 (see C9 in rlock/TODO.md).
+    plugin_meta_prefetch
 
     local plugin
     for plugin in "${available[@]}"; do

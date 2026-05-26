@@ -6,6 +6,37 @@ All notable changes to rlock — one-liner per change. Date-stamped releases gro
 
 - (nothing pending)
 
+## v0.1.5 — 2026-05-27
+
+### Skip duplicate `detect_triggers` in non-tty mode
+
+`rl new`'s post-resolve "extra triggered plugins" prompt branch
+iterates every available plugin and reads each `plugin.toml` —
+~120 ms on M3 with 13 plugins. The branch then offers an
+interactive `read -rp` confirmation that can't accept input
+without a tty, so the whole detection pass is dead weight for
+programmatic callers (`bake run`, scripts, CI). Add `-t 0`
+guard at the branch top to skip the detection entirely when
+stdin is not a tty. Save: ~70–120 ms per warm `rl new`.
+
+### In-process memoize for plugin TOML reads
+
+Hot loops (`detect_triggers`, `snapshot_walk_chain`) called
+`plugin_dir` + `toml_get*` for many plugins via `$(...)`
+subshells — each call forked `sed`/`awk`. Add a parent-shell
+prefetch (`plugin_meta_prefetch`) that slurps every discoverable
+`plugin.toml` into an associative array (`_TOML_CACHE` in
+`toml.sh` + `_PLUGIN_DIR_CACHE` in `plugin.sh`). Bash inherits
+the arrays into subshells, so subsequent `toml_get*` calls in
+`$(...)` parse the cached strings via bash builtins instead of
+forking. Not a disk-based cache — purely subshell-inherited
+memoize within one `rl new` process; the cache only lives for
+the lifetime of the shell that ran prefetch.
+
+Save: ~70 ms wall-clock on M3 warm restore (rails-pg-sample,
+~13 plugins). Variance also tightens because the per-fork CPU
+contention that produced bimodal warm cohorts in v0.1.4 is gone.
+
 ## v0.1.4 — 2026-05-26
 
 ### Stage memory.bin via hardlink instead of cp

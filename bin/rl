@@ -99,8 +99,13 @@ cmd_new() {
     fi
 
     # Check for additional triggered plugins not yet in the resolved list
-    # (only when plugins were explicitly requested via CLI args)
-    if [[ ${#requested[@]} -gt 0 && ${#resolved[@]} -gt 0 && "$_prompted" != "1" ]]; then
+    # (only when plugins were explicitly requested via CLI args). Skip in
+    # non-interactive mode: detect_triggers iterates every plugin and reads
+    # each plugin.toml — measured ~120 ms on M3 with 13 plugins. The prompt
+    # below can't accept input without a tty, so the whole branch is dead
+    # weight for programmatic callers (bake-run, scripts, CI). Cheap guard
+    # at the top instead of paying for the detection then discarding it.
+    if [[ ${#requested[@]} -gt 0 && ${#resolved[@]} -gt 0 && "$_prompted" != "1" && -t 0 ]]; then
         local -a extra_triggered
         export ACTIVATED_PLUGINS="${resolved[*]}"
         mapfile -t extra_triggered < <(detect_triggers "$(pwd)" "${available[@]}")

@@ -258,3 +258,31 @@ In-place update of leaf incremental layers.
    workload (e.g., claude-code minor version bumps + npm dep churn
    over 30 days) to know if this saves real disk vs being a clever
    optimization with no observable benefit.
+
+## (?) snapshot_walk_chain wall-clock overhead — measured 186 ms on rails-pg-sample warm
+
+Out of 820 ms of rl/bake overhead at warm-restore wall-clock (M3,
+2026-05-27 round 12 bench), `snapshot_walk_chain` itself takes
+186 ms. Most of that is forking subprocesses for `plugin_has_snapshot`,
+`plugin_snapshot_strategy`, `plugin_snapshot_kind`, `run_hook
+snapshot_key` for each plugin in the chain — each re-reads the
+plugin's `plugin.toml`, each is a `bash -c` style hop.
+
+Question mark because **the user explicitly does not want a
+persistent cache for this** (memory: "мне претит идея вводить кеш на
+такое"). Possible non-cache approaches:
+
+- **In-process memoize** within a single `rl new` invocation:
+  read each plugin's `plugin.toml` once into a bash associative
+  array, serve subsequent `plugin_*` queries from there. Not a
+  persistent cache — pure deduplication of redundant file reads
+  within the same process. Estimated saving: 50–80 ms.
+- **Inline hook-presence detection** to skip `run_hook` fork when
+  the hook isn't defined (plugin's snapshot_* hooks are absent for
+  most plugins).
+- **Profile first with `bash -x`** to confirm where the 186 ms
+  actually goes — could be one stray `qemu-img info` or `stat -t`
+  on a per-layer basis. Don't optimize the wrong loop.
+
+Defer until profiled. The 186 ms is real but the right intervention
+depends on the breakdown.
