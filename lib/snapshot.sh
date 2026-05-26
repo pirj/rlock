@@ -70,7 +70,7 @@ snapshot_save() {
     # promotes the running VM into an existing cache entry (potentially
     # changing kind cold→live or vice versa — the stale memory.bin from
     # a previous live capture would mislead rebase if left in place).
-    rm -f "$dir/disk.qcow2" "$dir/memory.bin" "$dir/memory.bin.zst" "$dir/meta.json"
+    rm -f "$dir/disk.qcow2" "$dir/memory.bin" "$dir/memory.bin.zst" "$dir/memory.bin.zstpatch" "$dir/memory.format" "$dir/meta.json"
 
     case "$kind" in
         cold)
@@ -87,11 +87,32 @@ snapshot_save() {
             # the host; whichever form aq produced we move as-is — both
             # are recognised by snapshot_walk_vm_rebase on restore.
             local tag="__rl_cache_${plugin}_${key:0:32}_$$"
-            aq snapshot create "$vm" "$tag" >/dev/null
+
+            # B5 opt-in: when AQ_MEMORY_PATCH_MODE=1 and the parent layer
+            # is also a live entry with memory state, tell aq to emit a
+            # zstd patch against the parent's memory instead of a full
+            # compression. ~95% disk saving when most memory pages are
+            # unchanged across layers (typical for plugin chains that
+            # extend an already-running stack). Restore is single-thread
+            # chain reconstruction — slower than direct decompression,
+            # but acceptable when disk is the binding constraint (CI
+            # cache pushes, OCI transport).
+            local _patch_env=()
+            if [[ "${AQ_MEMORY_PATCH_MODE:-}" == "1" && -n "$parent_plugin" && -n "$parent_key" ]]; then
+                local _parent_mem="$RL_CACHE_DIR/$parent_plugin/$parent_key/memory.bin.zst"
+                if [[ -f "$_parent_mem" ]]; then
+                    _patch_env=(env "AQ_PARENT_MEMORY_ZST=$_parent_mem" "AQ_MEMORY_PATCH_MODE=1")
+                fi
+            fi
+
+            "${_patch_env[@]}" aq snapshot create "$vm" "$tag" >/dev/null
             local aq_dir
             aq_dir=$(snapshot_aq_tag_dir "$tag")
             mv "$aq_dir/disk.qcow2" "$dir/disk.qcow2"
-            if [[ -f "$aq_dir/memory.bin.zst" ]]; then
+            if [[ -f "$aq_dir/memory.bin.zstpatch" ]]; then
+                mv "$aq_dir/memory.bin.zstpatch" "$dir/memory.bin.zstpatch"
+                mv "$aq_dir/memory.format" "$dir/memory.format" 2>/dev/null || true
+            elif [[ -f "$aq_dir/memory.bin.zst" ]]; then
                 mv "$aq_dir/memory.bin.zst" "$dir/memory.bin.zst"
             elif [[ -f "$aq_dir/memory.bin" ]]; then
                 mv "$aq_dir/memory.bin" "$dir/memory.bin"
@@ -121,6 +142,79 @@ META
 snapshot_rebase() {
     local out="$1" backing="$2"
     qemu-img create -f qcow2 -b "$backing" -F qcow2 "$out" >/dev/null
+}
+
+# Read meta.json for a cache entry and print the parent's full cache path
+# (or empty if no parent / parent missing). Used by patch-chain restore.
+_snapshot_parent_dir() {
+    local cache_dir="$1"
+    local meta="$cache_dir/meta.json"
+    [[ -f "$meta" ]] || { echo ""; return; }
+    local pp pk
+    pp=$(grep -o '"parent_plugin"[[:space:]]*:[[:space:]]*"[^"]*"' "$meta" | sed 's/.*"\([^"]*\)"$/\1/')
+    pk=$(grep -o '"parent_key"[[:space:]]*:[[:space:]]*"[^"]*"' "$meta" | sed 's/.*"\([^"]*\)"$/\1/')
+    if [[ -n "$pp" && -n "$pk" ]]; then
+        echo "$RL_CACHE_DIR/$pp/$pk"
+    fi
+}
+
+# Reconstruct a leaf live layer's raw memory.bin via patch chain.
+# Walks back from leaf via meta.json's parent_plugin/parent_key fields
+# until it finds an ancestor stored as full memory.bin.zst (the "base"
+# of the chain). Decompresses that base into a temp file, then applies
+# each forward layer's memory.bin.zstpatch in sequence to produce the
+# leaf's raw memory state. Writes the result to $out_raw.
+#
+# Returns 1 if any link in the chain is missing.
+#
+# Per zstd 1.5+ behaviour, --patch-from streams are single-threaded;
+# expect ~2-3 s per chain step on M3 with 1.6 GiB raw layers.
+_snapshot_reconstruct_memory_chain() {
+    local leaf_cache_dir="$1" out_raw="$2"
+    local -a chain=("$leaf_cache_dir")
+    local cur="$leaf_cache_dir"
+    # Walk back until we hit a layer with a full memory.bin.zst (no
+    # .zstpatch) — that's the chain base.
+    while [[ -f "$cur/memory.bin.zstpatch" && ! -f "$cur/memory.bin.zst" ]]; do
+        local parent
+        parent=$(_snapshot_parent_dir "$cur")
+        if [[ -z "$parent" || ! -d "$parent" ]]; then
+            echo "  ERROR: patch chain broken at $cur — no parent cache entry" >&2
+            return 1
+        fi
+        cur="$parent"
+        chain=("$parent" "${chain[@]}")
+    done
+
+    local base="${chain[0]}"
+    if [[ ! -f "$base/memory.bin.zst" ]]; then
+        echo "  ERROR: chain base $base lacks memory.bin.zst" >&2
+        return 1
+    fi
+
+    echo "  reconstructing memory chain: ${#chain[@]} layer(s) from $(basename "$(dirname "$base")")/$(basename "$base") -> $(basename "$(dirname "$leaf_cache_dir")")/$(basename "$leaf_cache_dir")" >&2
+
+    # Decompress the chain base into a working raw file. Use pzstd when
+    # available — base is multi-frame, parallel decode applies.
+    if command -v pzstd >/dev/null 2>&1; then
+        pzstd -dc "$base/memory.bin.zst" > "$out_raw"
+    else
+        zstd -dc "$base/memory.bin.zst" > "$out_raw"
+    fi
+
+    # Apply each forward patch.
+    local i tmp_next
+    for ((i=1; i<${#chain[@]}; i++)); do
+        local link="${chain[i]}"
+        local patch="$link/memory.bin.zstpatch"
+        if [[ ! -f "$patch" ]]; then
+            echo "  ERROR: chain link $link has no memory.bin.zstpatch" >&2
+            return 1
+        fi
+        tmp_next=$(mktemp -t aq-patch-tmp-XXXXXX)
+        zstd -dc --patch-from="$out_raw" "$patch" > "$tmp_next"
+        mv "$tmp_next" "$out_raw"
+    done
 }
 
 # --- VM seam ---
@@ -183,6 +277,23 @@ snapshot_walk_vm_rebase() {
         # Always clear BOTH forms so a previous layer's incoming doesn't
         # bleed through. aq's start path picks whichever form is staged.
         rm -f "$vm_dir/incoming-memory.bin" "$vm_dir/incoming-memory.bin.zst"
+        # B5: when the leaf layer is a patch (memory.bin.zstpatch),
+        # reconstruct the raw memory by walking the parent chain and
+        # applying patches forward. aq's start path sees a plain
+        # incoming-memory.bin and uses `-incoming file:` (no further
+        # decompression). This adds reconstruction cost to every restore
+        # of a patch leaf but saves disk on the cached chain itself.
+        if [[ -f "$cache_dir/memory.bin.zstpatch" && ! -f "$cache_dir/memory.bin.zst" ]]; then
+            echo "  reconstructing patch chain into incoming-memory.bin..." >&2
+            if _snapshot_reconstruct_memory_chain "$cache_dir" "$vm_dir/incoming-memory.bin"; then
+                echo "  staged (patch-chain): $cache_dir -> $vm_dir/incoming-memory.bin ($(stat -c%s "$vm_dir/incoming-memory.bin" 2>/dev/null) B)" >&2
+            else
+                echo "  ERROR: patch-chain reconstruction failed; restore will fall back to cold boot" >&2
+                rm -f "$vm_dir/incoming-memory.bin"
+            fi
+            return
+        fi
+
         local src dst
         if [[ -f "$cache_dir/memory.bin.zst" ]]; then
             src="$cache_dir/memory.bin.zst"
@@ -231,6 +342,13 @@ snapshot_walk_vm_rebase() {
 snapshot_walk_chain() {
     local vm="$1"; shift
     local parent_plugin="" parent_key="" parent_path=""
+
+    # Pre-slurp every discoverable plugin's plugin.toml into the
+    # in-process TOML cache + plugin-dir cache. The loop below dispatches
+    # 4-6 toml lookups per plugin via subshells; without prefetch each
+    # one forks sed/awk on the same files. ~50-80 ms save on warm
+    # rails-pg-sample. See C9 in rlock/TODO.md.
+    plugin_meta_prefetch
 
     # Once any layer in the chain (cache-hit or freshly-built) is live,
     # ALL subsequent layers are force-promoted to live. Building a cold

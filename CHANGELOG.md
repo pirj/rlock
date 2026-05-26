@@ -6,6 +6,52 @@ All notable changes to rlock — one-liner per change. Date-stamped releases gro
 
 - (nothing pending)
 
+## v0.1.6 — 2026-05-27
+
+### B5 wiring — zstd --patch-from for stacked live layers (opt-in)
+
+When `AQ_MEMORY_PATCH_MODE=1` is set in the environment,
+`snapshot_save` (live kind) now passes
+`AQ_PARENT_MEMORY_ZST=<parent_plugin>/<parent_key>/memory.bin.zst`
+to `aq snapshot create`, which emits the live memory state as
+a zstd delta against the parent's decompressed memory (see
+aq's v2.5.34 entry). When the parent isn't a live layer or no
+parent.memory.bin.zst exists in the cache, save behaviour is
+unchanged from v0.1.5.
+
+The captured artifact is a `memory.bin.zstpatch` plus a
+`memory.format` sentinel — stored alongside disk.qcow2 and
+meta.json under `$RL_CACHE_DIR/<plugin>/<key>/`.
+
+On restore, `snapshot_walk_vm_rebase` detects `.zstpatch` on
+the leaf live layer and reconstructs the raw memory.bin via
+chain walk:
+1. Follow meta.json's `parent_plugin` / `parent_key` links
+   back until a layer with full `memory.bin.zst` is reached
+   (the chain base).
+2. Decompress the base into a working raw file (parallel via
+   pzstd if available, else sequential zstd).
+3. For each forward link, apply
+   `zstd -d --patch-from=<working_raw>` to the layer's
+   `.zstpatch`, replacing working_raw with the result.
+4. Move the final raw into vm_dir/incoming-memory.bin so aq's
+   `-incoming file:` consumer uses it like any plain memory
+   snapshot.
+
+Chain reconstruction is single-thread + sequential; each step
+takes ~2–3 s per 1.6 GiB raw layer on M3. The trade is disk vs
+restore time: ~95 % less disk per delta layer in exchange for
+~2–3 s per extra link at restore. Useful when CI cache / OCI
+push size is the binding constraint and chain depth is shallow
+(2–4 layers); plain pzstd (v2.5.33) remains the better choice
+for deep chains or laptops where disk is plentiful.
+
+Not yet exercised by the existing rails-pg-sample fixture —
+that workload has a single live layer (`docker-compose`), so
+the patch path never triggers. A multi-live-layer fixture is
+needed to bench the actual disk/time tradeoff. Plumbing only
+in this release.
+
 ## v0.1.5 — 2026-05-27
 
 ### Skip duplicate `detect_triggers` in non-tty mode
