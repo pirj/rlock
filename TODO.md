@@ -204,3 +204,57 @@ Explicit `--memory=1G` passed to `aq new` when no plugin declares.
  - Make it explicit: always pass `--memory` to aq new, even if it's
    the same as aq's default. Helps debuggability and surfaces the
    value in `.memory` markers for downstream tooling.
+
+In-place update of leaf incremental layers.
+ - A snapshot layer with `strategy = "incremental"` rebuilds on cache
+   miss by running its installer on top of the parent's cached state,
+   rather than rebuilding from scratch. Useful for installers whose
+   output is additive: `npm install -g @anthropic-ai/claude-code` to a
+   newer version, `docker compose pull` of a newer image tag, `bundle
+   install` adding a single new gem.
+ - Today every incremental rebuild produces a new cache slot under
+   $RL_CACHE_DIR/<plugin>/<key>/ because the snapshot key changes.
+   When the layer is a LEAF in the active chain (no downstream plugin
+   chains off its qcow2), the new slot has no descendants either way,
+   so the old slot is dead weight on disk the moment the new one
+   lands.
+ - Proposed: when `snapshot_save` is called for a leaf-position layer
+   that was built incrementally, overwrite the existing slot for this
+   plugin rather than allocating a fresh one keyed by the new
+   snapshot_key. Equivalent to `rl warm rebuild` (commit f097dd6) but
+   triggered automatically on the cache-miss-via-incremental path
+   instead of via explicit user command.
+ - Open questions:
+   - How does the framework know a layer is leaf in the *current*
+     distribution? `walk_chain` knows position; cache invalidation is
+     keyed per-plugin not per-chain. The "I'm leaf in this walk"
+     signal lives at the call site of `snapshot_save`, not in the
+     plugin metadata. Simplest path: `walk_chain` passes `is_leaf=1`
+     to the save call when iterating the last plugin.
+   - What does "in-place" mean on disk? qcow2 backing files are
+     immutable from a child's perspective, but a leaf has no child.
+     Atomic mv of the new disk.qcow2 / memory.bin / meta.json over the
+     old slot is sufficient. Concurrent `rl new` on the same project
+     is already serialized by aq's per-VM lock, so no readers race.
+   - How does this interact with `rl warm rebuild` (which already
+     overwrites the topmost active plugin's slot)? They converge to
+     the same operation. Auto-trigger could be implemented as
+     `walk_chain` calling the same internal helper at the right
+     moment.
+ - Unsafe cases that LOOK like increments but aren't: anything
+   requiring data migration. Example: a `postgres-data` snapshot
+   layer where the underlying PG major version changes between runs —
+   the on-disk data directory layout is incompatible, `postgres`
+   won't start against it. These are not increments; the layer needs
+   a full rebuild from a pre-PG-data parent. The user-visible rule:
+   if `snapshot_build` can produce the new state by running its
+   provisioning steps on top of the previous state (and the result is
+   correct), it's an increment. Otherwise it's a rebuild and the
+   normal new-slot path applies. Plugin authors decide via the
+   strategy declaration; in-place is just an optimization within the
+   `incremental` strategy.
+ - Defer until measured: do we have evidence that disk churn from
+   incremental layer rebuilds is meaningful? Need a representative
+   workload (e.g., claude-code minor version bumps + npm dep churn
+   over 30 days) to know if this saves real disk vs being a clever
+   optimization with no observable benefit.

@@ -6,6 +6,19 @@ All notable changes to rlock — one-liner per change. Date-stamped releases gro
 
 - (nothing pending)
 
+## v0.1.4 — 2026-05-26
+
+### Stage memory.bin via hardlink instead of cp
+
+`snapshot_walk_vm_rebase`: stage cached `memory.bin[.zst]` to the
+vm_dir via `ln` (hardlink) instead of `cp`. Zero-copy when cache
+and vm_dir share a filesystem (the normal case). qemu reads the
+file once and removes the staged path after migration; with a
+hardlink the cache file's inode is preserved by the remaining
+refcount. Falls back to `cp` on cross-fs / hardlink-disallowed
+setups. Expected saving on cross-host warm restore: ~5–7 s on
+GH Actions Azure disks (550 MB file copy → instant link).
+
 ## v0.1.3 — 2026-05-24
 
 ### Stage memory.bin to vm_dir after a live miss save

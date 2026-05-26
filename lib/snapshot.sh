@@ -183,14 +183,30 @@ snapshot_walk_vm_rebase() {
         # Always clear BOTH forms so a previous layer's incoming doesn't
         # bleed through. aq's start path picks whichever form is staged.
         rm -f "$vm_dir/incoming-memory.bin" "$vm_dir/incoming-memory.bin.zst"
+        local src dst
         if [[ -f "$cache_dir/memory.bin.zst" ]]; then
-            cp "$cache_dir/memory.bin.zst" "$vm_dir/incoming-memory.bin.zst"
-            echo "  staged: $cache_dir/memory.bin.zst -> $vm_dir/incoming-memory.bin.zst ($(stat -c%s "$vm_dir/incoming-memory.bin.zst" 2>/dev/null) B)" >&2
+            src="$cache_dir/memory.bin.zst"
+            dst="$vm_dir/incoming-memory.bin.zst"
         elif [[ -f "$cache_dir/memory.bin" ]]; then
-            cp "$cache_dir/memory.bin" "$vm_dir/incoming-memory.bin"
-            echo "  staged: $cache_dir/memory.bin -> $vm_dir/incoming-memory.bin" >&2
+            src="$cache_dir/memory.bin"
+            dst="$vm_dir/incoming-memory.bin"
         else
             echo "  WARN: kind=live but no memory.bin[.zst] in $cache_dir" >&2
+            return
+        fi
+
+        # Hardlink first — zero-copy stage when cache and vm_dir share
+        # a filesystem (which is normal: both under $HOME/.local/share/aq).
+        # qemu reads the file once and `rm`s the staged path after
+        # migration completes; with a hardlink that just drops one
+        # of two refcounts to the cache file's inode, the cache
+        # remains intact. Falls back to cp on cross-fs / hardlink-
+        # disallowed setups.
+        if ln "$src" "$dst" 2>/dev/null; then
+            echo "  staged (hardlink): $src -> $dst ($(stat -c%s "$dst" 2>/dev/null) B)" >&2
+        else
+            cp "$src" "$dst"
+            echo "  staged (cp): $src -> $dst ($(stat -c%s "$dst" 2>/dev/null) B)" >&2
         fi
     fi
     # kind=cold: leave any existing incoming-memory.bin / .zst in place.
