@@ -99,15 +99,53 @@ snapshot_save() {
             # below) — slower than direct decompression, but acceptable
             # when disk is the binding constraint (CI cache pushes, OCI
             # transport).
-            local _patch_env=()
-            if [[ "${AQ_MEMORY_SNAPSHOT:-}" == "zstd-patch" && -n "$parent_plugin" && -n "$parent_key" ]]; then
-                local _parent_mem="$RL_CACHE_DIR/$parent_plugin/$parent_key/memory.bin.zst"
-                if [[ -f "$_parent_mem" ]]; then
-                    _patch_env=(env "AQ_PARENT_MEMORY_ZST=$_parent_mem" "AQ_MEMORY_SNAPSHOT=zstd-patch")
+            #
+            # First live layer of the chain (parent is cold, no memory.bin.zst)
+            # has nothing to patch against. Downgrade transparently to plain
+            # `zstd` for that one layer so the chain still builds; subsequent
+            # live layers patch against this base. aq's strict mode errors
+            # if zstd-patch is set but no parent reference is provided, so we
+            # explicitly override the env var here instead of leaving the
+            # user's setting visible.
+            local _save_env=(env)
+            if [[ "${AQ_MEMORY_SNAPSHOT:-}" == "zstd-patch" ]]; then
+                # Walk back through the ancestor chain to find the most
+                # recent layer with a FULL memory.bin.zst (not .zstpatch).
+                # That becomes the patch base for the layer we're about
+                # to save. Every patch in the chain references the same
+                # full ancestor, so a chain of N patch layers means
+                # N decompress+apply cycles at restore — but only ONE
+                # full memory.bin.zst stored. The alternative — patch
+                # against the immediate ancestor regardless of its
+                # format — would require either keeping the parent's
+                # raw memory hot across saves (extra disk + plumbing)
+                # or recursive reconstruction at every save (expensive).
+                # Anchoring patches to the most recent full ancestor
+                # is simpler and gives most of the disk benefit for
+                # the shallow chains B5 targets (2–4 live layers).
+                local _wp="$parent_plugin" _wk="$parent_key" _parent_mem=""
+                while [[ -n "$_wp" && -n "$_wk" ]]; do
+                    local _cand="$RL_CACHE_DIR/$_wp/$_wk/memory.bin.zst"
+                    if [[ -f "$_cand" ]]; then _parent_mem="$_cand"; break; fi
+                    local _meta="$RL_CACHE_DIR/$_wp/$_wk/meta.json"
+                    [[ -f "$_meta" ]] || break
+                    local _np _nk
+                    _np=$(grep -o '"parent_plugin"[[:space:]]*:[[:space:]]*"[^"]*"' "$_meta" | sed 's/.*"\([^"]*\)"$/\1/')
+                    _nk=$(grep -o '"parent_key"[[:space:]]*:[[:space:]]*"[^"]*"' "$_meta" | sed 's/.*"\([^"]*\)"$/\1/')
+                    _wp="$_np"; _wk="$_nk"
+                done
+                if [[ -n "$_parent_mem" ]]; then
+                    _save_env+=("AQ_PARENT_MEMORY_ZST=$_parent_mem" "AQ_MEMORY_SNAPSHOT=zstd-patch")
+                else
+                    # No full-memory ancestor (we're the first live layer
+                    # of the chain). Force plain zstd so this layer
+                    # becomes the anchor that future patch siblings
+                    # reference.
+                    _save_env+=("AQ_MEMORY_SNAPSHOT=zstd")
                 fi
             fi
 
-            "${_patch_env[@]}" aq snapshot create "$vm" "$tag" >/dev/null
+            "${_save_env[@]}" aq snapshot create "$vm" "$tag" >/dev/null
             local aq_dir
             aq_dir=$(snapshot_aq_tag_dir "$tag")
             mv "$aq_dir/disk.qcow2" "$dir/disk.qcow2"
@@ -205,6 +243,14 @@ _snapshot_reconstruct_memory_chain() {
     fi
 
     # Apply each forward patch.
+    # --long=31 matches the encoder's 2 GiB window setting (see aq's
+    # `Live snapshot: computing memory delta` block) — without it
+    # zstd refuses to decode any frame whose window exceeds the
+    # default 128 MiB cap. The function is called from inside an
+    # `if` in snapshot_walk_vm_rebase, which disables `set -e` for
+    # the body — so we have to check the zstd exit explicitly and
+    # return 1 on failure, otherwise an empty raw file gets staged
+    # and the next aq start tries to migrate from a 0-byte memory.bin.
     local i tmp_next
     for ((i=1; i<${#chain[@]}; i++)); do
         local link="${chain[i]}"
@@ -214,7 +260,11 @@ _snapshot_reconstruct_memory_chain() {
             return 1
         fi
         tmp_next=$(mktemp -t aq-patch-tmp-XXXXXX)
-        zstd -dc --patch-from="$out_raw" "$patch" > "$tmp_next"
+        if ! zstd -dc --long=31 --patch-from="$out_raw" "$patch" > "$tmp_next"; then
+            echo "  ERROR: patch apply failed at link $link" >&2
+            rm -f "$tmp_next"
+            return 1
+        fi
         mv "$tmp_next" "$out_raw"
     done
 }

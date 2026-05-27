@@ -6,6 +6,65 @@ All notable changes to rlock — one-liner per change. Date-stamped releases gro
 
 - (nothing pending)
 
+## v0.1.9 — 2026-05-27
+
+### B5 patch-mode fixes for chain depth > 2
+
+Pairs with aq v2.5.36 to make `AQ_MEMORY_SNAPSHOT=zstd-patch`
+actually usable on chains deeper than a single patch layer.
+Three fixes, all in `lib/snapshot.sh`:
+
+**Walk to the most recent FULL ancestor when picking the
+patch reference.** v0.1.6's save logic only looked at the
+immediate parent's `memory.bin.zst` — if the parent was itself
+a patch (`memory.bin.zstpatch`), it silently downgraded to
+plain zstd, breaking chain depth = 3+. Now walks back via
+`meta.json`'s `parent_plugin` / `parent_key` links until a
+layer with full `memory.bin.zst` is found. Every patch in the
+chain references the same full anchor, so a chain of N patch
+layers means N decompress+apply cycles at restore (still
+single-thread, ~1.7 s per step on M3) — but only ONE full
+memory.bin.zst stored. Measured 98.8 % saving on each patch
+layer of the rails-pg-sample 3-live-layer fixture.
+
+**Add `--long=31` to chain reconstruction's decompress.** Same
+bug as aq v2.5.36's save side: zstd CLI defaults to a 128 MiB
+window, refuses to decode any frame with a larger window. Our
+patches reference 1.6 GiB memory → always need --long=31.
+
+**Explicit error check on each patch apply.** The chain
+reconstructor runs inside an `if` in
+`snapshot_walk_vm_rebase`, which disables `set -e` for its
+body. A failing `zstd -dc` was silently producing an empty
+tmpfile, the mv promoted it to `out_raw`, and the loop
+continued; the final empty file got staged as
+`incoming-memory.bin` and the next aq start tried to migrate
+from 0 bytes. Now each `zstd` invocation is `if ! zstd ...`
+wrapped with explicit `return 1` on failure.
+
+**Transparent zstd→zstd-patch downgrade for chain root.** When
+`AQ_MEMORY_SNAPSHOT=zstd-patch` is set but the current layer
+is the first live layer of the chain (parent is cold, has no
+`memory.bin.zst` anywhere up the ancestry), the save path now
+explicitly overrides the env var to `zstd` for that aq
+invocation. Without the override, aq's strict patch-mode
+errors out at save time ("AQ_MEMORY_SNAPSHOT=zstd-patch requires
+AQ_PARENT_MEMORY_ZST..."). Now the chain root silently
+records as plain zstd and becomes the anchor for subsequent
+patch siblings.
+
+Measured trade-off on rails-pg-sample (3 live layers, M3):
+- Cache total: 2.4 GiB (patch) vs 3.4 GiB (plain zstd) → −29 %
+- Warm bake-run: 6.18 s (patch) vs 2.02 s (plain zstd) → +4.16 s
+- Per patch layer disk: ~6 MiB vs ~478 MiB → ~98.8 %
+
+The ~+4 s warm cost on this fixture is dominated by chain
+reconstruction (~2 s for one patch step) + raw memory.bin
+load via `-incoming file:` taking longer than the streaming
+`-incoming exec:pzstd -dc` path (~1.7 s extra wait_ssh observed).
+Worth it when the binding constraint is OCI cache size, not
+wall-clock per warm. Opt-in.
+
 ## v0.1.8 — 2026-05-27
 
 ### Docs-only release: close C9 TODO
