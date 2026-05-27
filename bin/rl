@@ -41,10 +41,10 @@ cmd_new() {
     #                  straight to aq new --size). Defaults to 16G —
     #                  generous for arbitrary CI workloads but
     #                  wasteful for small projects; set this when the
-    #                  workload is bounded (e.g. bakerish.toml's
+    #                  workload is bounded (e.g. snapcompose.toml's
     #                  [disk] size for a postgres-only fixture).
     # --name=<vm-name> Override the default VM name (basename of cwd).
-    #                  Used by `bake run --vm-suffix` to create per-
+    #                  Used by `snapc run --vm-suffix` to create per-
     #                  shard VMs from a single project dir.
     local memory_override=""
     local size_override=""
@@ -103,7 +103,7 @@ cmd_new() {
     # non-interactive mode: detect_triggers iterates every plugin and reads
     # each plugin.toml — measured ~120 ms on M3 with 13 plugins. The prompt
     # below can't accept input without a tty, so the whole branch is dead
-    # weight for programmatic callers (bake-run, scripts, CI). Cheap guard
+    # weight for programmatic callers (snapc-run, scripts, CI). Cheap guard
     # at the top instead of paying for the detection then discarding it.
     if [[ ${#requested[@]} -gt 0 && ${#resolved[@]} -gt 0 && "$_prompted" != "1" && -t 0 ]]; then
         local -a extra_triggered
@@ -139,7 +139,7 @@ cmd_new() {
 
     # Resolve memory for `aq new --memory`. Precedence:
     #   1. --memory flag (parsed at the top of cmd_new) — explicit user
-    #      override, e.g. from `bakerish.toml [memory] size`.
+    #      override, e.g. from `snapcompose.toml [memory] size`.
     #   2. max across active plugins' [snapshot] memory = "NG" — auto-
     #      derived. Plugins that need more than aq's default 1G
     #      (notably docker-compose with kind = "live") declare it; the
@@ -380,7 +380,7 @@ EOF
 
 # rl cache stats   — per-plugin hit/miss/rebuild-time table.
 # Future: rl cache ls, rl cache rm <plugin>[:<key>] (today live in
-# bakeri.sh's bake-cache; framework command exists only for the
+# snapcompose's snapc-cache; framework command exists only for the
 # analytics surface).
 cmd_cache() {
     local sub="${1:-stats}"
@@ -411,7 +411,7 @@ case "${1:-help}" in
         # Try plugin command dispatch. dispatch_command does a two-pass
         # lookup: first ACTIVE_PLUGINS (= what `.rl/plugins` reports for
         # the current project), then all DISCOVERABLE plugins as
-        # fallback for command-only plugins like bake-run / bake-cache
+        # fallback for command-only plugins like snapc-run / snapc-cache
         # that don't need to be in the active chain. We always invoke
         # it — even with an empty ACTIVE_PLUGINS — so pass 2 runs and
         # the command-only fallback path works in a fresh project dir

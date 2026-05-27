@@ -22,7 +22,7 @@ is a security issue and should be reported privately.
   sandbox against the host being compromised by guest code.
 - Issues in upstream QEMU, the Linux kernel, Alpine packages, etc.
   Report those to their respective projects.
-- Plugin-pack-specific issues (bakeri.sh, ai.rlock, anything in
+- Plugin-pack-specific issues (snapcompose, ai.rlock, anything in
   `~/.config/rl/plugins/`) — report to the plugin pack's repo.
 
 ## Reporting

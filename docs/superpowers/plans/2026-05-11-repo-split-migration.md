@@ -11,7 +11,7 @@ Strategic split of the current `ai.rlock` repository into four distinct units, e
 | `ai.rlock` (this repo, narrowed) | AI-agent sandbox distribution | `plugins/{auth-proxy,agent-claude-code,agent-codex}`, AI UX bits (`rl auth`, `rl code` if AI-specific) |
 | `<bake>` (new, name TBD) | CI / pre-baked-environment distribution | `plugins/{docker-engine,docker-compose,ruby-bundler,npm,mise,rails-*}`, CI-oriented commands |
 
-Naming for the CI distribution is a placeholder (`<bake>`) pending domain availability. Likely candidates: `bakeri.sh`, `prebake.sh`, `oven.sh`, `proofed.sh`. The migration plan does not depend on the final choice — only the rename step at the end does.
+Naming for the CI distribution is a placeholder (`<bake>`) pending domain availability. Likely candidates: `snapcompose`, `prebake.sh`, `oven.sh`, `proofed.sh`. The migration plan does not depend on the final choice — only the rename step at the end does.
 
 ## Guiding principles
 
@@ -33,7 +33,7 @@ Naming for the CI distribution is a placeholder (`<bake>`) pending domain availa
   - `code` → AI-specific (ai.rlock) — it's `ssh + tmux attach`, which is the agent's interactive UX
   - `auth` → AI-specific (ai.rlock) — manages API keys for `auth-proxy`
   - `branch` (subcommand) → framework (with `branch` plugin)
-  - Future `bake run` / `bake pr` → in `<bake>`
+  - Future `snapc run` / `bake pr` → in `<bake>`
   - Plugins already declare `commands` in `plugin.toml`; the framework's dispatcher delegates by lookup. AI/CI distros add their commands via their own plugins. **No code change needed** in dispatcher logic — it already works this way.
 
 - **Protocol versioning.** Add `protocol_version = 1` to `plugin.toml` schema now, before the framework is extracted. Framework rejects plugins with newer protocol than it supports.
@@ -86,11 +86,11 @@ Create the CI distribution repo. Move from `ai.rlock` (and from the framework wh
 
 - `plugins/docker-engine`, `plugins/docker-compose` (just added in step 0) → move
 - New plugins as separate commits/PRs in `<bake>` repo: `mise`, `ruby-bundler`, `npm`, `rails-db-migrations`, `rails-db-seeds`, `rails-load-db-schema`
-- CI-flavor commands: `bake run` (one-shot job), `bake pr` (PR-from-untrusted), `bake snapshot` (manage cached layers explicitly)
+- CI-flavor commands: `snapc run` (one-shot job), `bake pr` (PR-from-untrusted), `bake snapshot` (manage cached layers explicitly)
 
 **Wiring**: `<bake>` is a plugin pack on the same model as `ai.rlock`. Combination `rlock + <bake>` gives the CI experience. `rlock + ai.rlock + <bake>` is also valid (an AI agent could use Docker-in-VM through `<bake>` plugins).
 
-**Exit gate**: a user can run a sample CI job — `bake run --image rails:warm` — that pulls the warm snapshot and executes the job in <1s wall clock.
+**Exit gate**: a user can run a sample CI job — `snapc run --image rails:warm` — that pulls the warm snapshot and executes the job in <1s wall clock.
 
 ### Step 3 — Delete the deprecated translator
 

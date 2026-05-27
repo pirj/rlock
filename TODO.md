@@ -43,7 +43,7 @@ Per-ecosystem snapshot layer order is driven by change frequency.
  - Make order configurable per project? Or auto-reorder based on observed lockfile churn?
  - Revisit once we have real usage data.
 
-[done 2026-05-19, commit f6c912e] Snapshot analytics. Shipped as `rl cache stats`. Per-plugin stats.json under $RL_CACHE_DIR/<plugin>/stats.json, recorded by walk_chain on each iteration (hit / miss / duration). Ephemeral layers are recorded too (every iteration is a miss). Disk usage stays in bake-cache. Open: average duration is total/misses — no median yet; "disk usage per plugin" surfaced separately by `bake-cache`. Reconsider both if churn signals make them load-bearing.
+[done 2026-05-19, commit f6c912e] Snapshot analytics. Shipped as `rl cache stats`. Per-plugin stats.json under $RL_CACHE_DIR/<plugin>/stats.json, recorded by walk_chain on each iteration (hit / miss / duration). Ephemeral layers are recorded too (every iteration is a miss). Disk usage stays in snapc-cache. Open: average duration is total/misses — no median yet; "disk usage per plugin" surfaced separately by `snapc-cache`. Reconsider both if churn signals make them load-bearing.
 
 Subset-detection for snapshot keys.
  - Some plugins (e.g., rails-db-migrations when only new migrations are added) have additive-only key changes.
@@ -51,7 +51,7 @@ Subset-detection for snapshot keys.
  - Requires extending snapshot_key protocol to optionally return a set.
  - Skip until analytics show it would meaningfully reduce rebuild time.
 
-For the bakeri.sh spec (when written):
+For the snapcompose spec (when written):
  - Document the shared "alpine + dockerd installed" layer.
  - It already exists by design: docker-engine plugin's snapshot_key is a
    constant ('docker-engine-recipe-v1'), so the cached qcow2 is shared
@@ -61,18 +61,18 @@ For the bakeri.sh spec (when written):
  - Measurement TODO: how long does `apk add docker docker-cli-compose`
    take cold vs. cache-hit rebase to that snapshot? And how big is the
    snapshot on disk? Currently ~470 MB. If the build is <10s, caching
-   may not be worth the disk cost. Decide before the bakeri.sh release.
+   may not be worth the disk cost. Decide before the snapcompose release.
  - Companion measurement: at what point in the chain does caching pay
    off the most? (Likely the docker-compose `up + healthcheck` layer
    for typical projects, not the docker-engine layer itself.)
  - Do NOT introduce a separate "bare Alpine" snapshot below docker-engine.
-   In bakeri.sh every VM activates docker-engine, so the bare-Alpine
+   In snapcompose every VM activates docker-engine, so the bare-Alpine
    layer would always have exactly one descendant (+dockerd) — pure
    overhead in this distribution.
 
 aq --memory=NG flag + live-snapshot RAM hotplug.
  - aq guests are hardcoded to -m 1G. Many kind=live snapshot consumers
-   (especially Docker workloads under bakeri.sh) need 4-8 GiB to be
+   (especially Docker workloads under snapcompose) need 4-8 GiB to be
    meaningful: even a small compose stack with postgres + redis blows
    past 1 GiB working set.
  - Two related deliverables, both tracked in aq/ROADMAP.md (canonical
@@ -111,7 +111,7 @@ slot. 118/118 bats.
 
 [done 2026-05-19, commit 003cfe2] snapshot_walk_vm_rebase loses earlier live layers' memory.bin. Fix: only touch incoming-memory.bin when the new layer is live (overwrite); on cold rebase, preserve. snapshot_walk_chain clears once at the start and before a miss-build boot. 3 new bats, 100/100.
 
-[done 2026-05-19, commit 0456f0f] Skip rebase+boot+stop cycle for no-op snapshot_build layers via `snapshot_should_skip` hook. Plugin prints "skip" to stdout to bail out of an iteration before VM boot. Stdout-based signal because the framework's plugin dispatch falls through to exit 0 when a hook isn't defined (exit-code protocol would mistake "absent" for "skip"). bakeri.sh's mise / ruby-bundler / npm adopt it (commit dfb1e55).
+[done 2026-05-19, commit 0456f0f] Skip rebase+boot+stop cycle for no-op snapshot_build layers via `snapshot_should_skip` hook. Plugin prints "skip" to stdout to bail out of an iteration before VM boot. Stdout-based signal because the framework's plugin dispatch falls through to exit 0 when a hook isn't defined (exit-code protocol would mistake "absent" for "skip"). snapcompose's mise / ruby-bundler / npm adopt it (commit dfb1e55).
 
 Plugin protocol v2: "command-only plugin" semantic.
 
@@ -119,8 +119,8 @@ Today, a plugin that exists purely to host CLI commands (no [snapshot]
 section, no provisioning hooks) must still declare `triggers = [...]`
 to appear in ACTIVE_PLUGINS, so the framework's `dispatch_command` can
 find it. The workaround is to mirror the distribution's union of
-triggers in every command-only plugin — see bakeri.sh's bake-run /
-bake-pr / bake-cache duplication. The 2026-05-19 architecture review
+triggers in every command-only plugin — see snapcompose's snapc-run /
+snapc-pr / snapc-cache duplication. The 2026-05-19 architecture review
 (Issue 3) calls this out as the kind of change that would justify
 protocol_version = 2.
 
@@ -144,7 +144,7 @@ Cross-machine snapshot transport.
    significant — depot.dev built an OCI-compatible registry for this
    (chunk-level caching of disk + memory snapshots).
  - From specs/2026-05-18-snapshot-kind-design.md "Out of scope / follow-ups".
- - Bakeri.sh follow-up — not in MVP. Revisit when bakeri.sh hits multi-
+ - Snapcompose.sh follow-up — not in MVP. Revisit when snapcompose hits multi-
    machine fleet use.
 
 Cold-boot optimization reading list.
@@ -190,7 +190,7 @@ CI: wire `integration_layered.sh` into the bats suite.
 
 End-to-end `cmd_new` smoke test in CI.
  - Validate the "sub-second warm" claim against a fresh runner.
- - Could reuse rails-pg-sample fixture from bakeri.sh.
+ - Could reuse rails-pg-sample fixture from snapcompose.
  - Asserts warm walk_chain ≤ N seconds (some generous bound — bench
    shows 2.7 s typical).
  - Useful as a regression detector for changes to walk_chain /
@@ -284,9 +284,9 @@ CPU contention that produced bimodal cohorts in v0.1.4 is gone).
 ### Possible follow-up (defer until profiled)
 
 Remaining framework overhead after v0.1.5 is ~750 ms (M3
-full-stack warm bake-run after R16 = 1854 ms total, aq phase
+full-stack warm snapc-run after R16 = 1854 ms total, aq phase
 ~1100 ms). The non-aq slice splits roughly:
-- bake-run preprocess (~80 ms — synthesise prebuild + first detect_triggers, paid before rl is called)
+- snapc-run preprocess (~80 ms — synthesise prebuild + first detect_triggers, paid before rl is called)
 - rl new orchestration (~250 ms — aq new + resolve_deps + check_* + spinners)
 - snapshot_walk_chain core (~100 ms — what's left after the memoize)
 - do_ssh + exec wrapper (~26 ms)

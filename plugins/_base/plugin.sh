@@ -4,7 +4,7 @@
 # distribution. Lifts the apk-add / rlock-user / sshd-hardening block
 # that used to live inline in cmd_new into a proper snapshot layer with
 # a constant snapshot_key, so the second cold `rl new` on the host —
-# regardless of distribution (ai.rlock / bakeri.sh / anything future) —
+# regardless of distribution (ai.rlock / snapcompose / anything future) —
 # gets a cache hit instead of paying ~30 s of repeat provisioning.
 #
 # The leading underscore in the plugin name marks this as framework-

@@ -12,8 +12,8 @@ set -euo pipefail
 #                    ~/.config/rl/plugins. Earlier entries win on name
 #                    conflicts (same precedence semantics as shell PATH).
 #                    Downstream consumers compose by prepending their
-#                    own dirs — e.g. bakeri.sh does
-#                    RLOCK_PLUGIN_PATH="$PWD/.bakerish/plugins:$HOME/.config/rl/plugins"
+#                    own dirs — e.g. snapcompose does
+#                    RLOCK_PLUGIN_PATH="$PWD/.snapcompose/plugins:$HOME/.config/rl/plugins"
 #                    so synthesised per-project plugins are discoverable
 #                    without rlock learning the downstream config files.
 PLUGIN_CORE_DIR="${PLUGIN_CORE_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../plugins" && pwd)}"
@@ -446,7 +446,7 @@ dispatch_command() {
     #           `rl new`. A plugin's command may depend on its provision
     #           hook having run, so we prefer the active set first.
     #   Pass 2: All DISCOVERABLE plugins (fallback for "command-only"
-    #           plugins like bake-run / bake-cache that have no
+    #           plugins like snapc-run / snapc-cache that have no
     #           [snapshot] section and no provision-time work — they
     #           are safe to invoke regardless of whether they appeared
     #           in the project's active chain).

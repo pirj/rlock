@@ -44,7 +44,7 @@ benefit decision** that the framework cannot make on its own:
   saving.
 
 The framework should not pick. The plugin author and ultimately the
-distribution (rlock vs ai.rlock vs bakeri.sh) should pick per layer.
+distribution (rlock vs ai.rlock vs snapcompose) should pick per layer.
 
 ## Goals
 

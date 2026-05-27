@@ -107,20 +107,20 @@ CMD
 
 @test "dispatch_command falls back to discoverable plugins (command-only)" {
     # Command-only plugin: declares 'commands' but is NOT in ACTIVE_PLUGINS.
-    mkdir -p "$PLUGIN_CORE_DIR/bake-cache/commands"
-    cat > "$PLUGIN_CORE_DIR/bake-cache/plugin.toml" <<'EOF'
+    mkdir -p "$PLUGIN_CORE_DIR/snapc-cache/commands"
+    cat > "$PLUGIN_CORE_DIR/snapc-cache/plugin.toml" <<'EOF'
 description = "Cache inspector"
-commands = ["bake-cache"]
+commands = ["snapc-cache"]
 EOF
-    cat > "$PLUGIN_CORE_DIR/bake-cache/commands/bake-cache.sh" <<'CMD'
+    cat > "$PLUGIN_CORE_DIR/snapc-cache/commands/snapc-cache.sh" <<'CMD'
 #!/usr/bin/env bash
 echo "cache-args:$*"
 CMD
-    chmod +x "$PLUGIN_CORE_DIR/bake-cache/commands/bake-cache.sh"
+    chmod +x "$PLUGIN_CORE_DIR/snapc-cache/commands/snapc-cache.sh"
 
-    # ACTIVE_PLUGINS deliberately does NOT include bake-cache.
+    # ACTIVE_PLUGINS deliberately does NOT include snapc-cache.
     ACTIVE_PLUGINS=""
-    run dispatch_command "bake-cache" "ls"
+    run dispatch_command "snapc-cache" "ls"
     assert_success
     assert_output "cache-args:ls"
 }

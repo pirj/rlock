@@ -193,7 +193,7 @@ M
 @test "snapshot_walk_vm_rebase preserves incoming-memory.bin from earlier live ancestor when this layer is cold" {
     # Chain: live ancestor placed incoming-memory.bin; later cold rebase
     # must NOT clear it (a cold layer on top of a live one is a typical
-    # bakeri.sh shape: docker-compose live, mise/ruby-bundler/npm cold).
+    # snapcompose shape: docker-compose live, mise/ruby-bundler/npm cold).
     local backing="$BATS_TEST_TMPDIR/cache/foo/k_cold/disk.qcow2"
     mkdir -p "$(dirname "$backing")"
     qemu-img create -f qcow2 "$backing" 1M >/dev/null

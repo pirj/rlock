@@ -55,7 +55,7 @@ patch siblings.
 
 Measured trade-off on rails-pg-sample (3 live layers, M3):
 - Cache total: 2.4 GiB (patch) vs 3.4 GiB (plain zstd) → −29 %
-- Warm bake-run: 6.18 s (patch) vs 2.02 s (plain zstd) → +4.16 s
+- Warm snapc-run: 6.18 s (patch) vs 2.02 s (plain zstd) → +4.16 s
 - Per patch layer disk: ~6 MiB vs ~478 MiB → ~98.8 %
 
 The ~+4 s warm cost on this fixture is dominated by chain
@@ -157,7 +157,7 @@ iterates every available plugin and reads each `plugin.toml` —
 ~120 ms on M3 with 13 plugins. The branch then offers an
 interactive `read -rp` confirmation that can't accept input
 without a tty, so the whole detection pass is dead weight for
-programmatic callers (`bake run`, scripts, CI). Add `-t 0`
+programmatic callers (`snapc run`, scripts, CI). Add `-t 0`
 guard at the branch top to skip the detection entirely when
 stdin is not a tty. Save: ~70–120 ms per warm `rl new`.
 
@@ -248,12 +248,12 @@ between.
 
 Accept `--size=<N|NG>` to override `aq new --size`. Default remains
 `16G` — generous for arbitrary CI workloads — but small projects
-can now drop to `4G`–`8G` via `bake run` reading `[disk] size` from
-`bakerish.toml` (which threads it through as this flag).
+can now drop to `4G`–`8G` via `snapc run` reading `[disk] size` from
+`snapcompose.toml` (which threads it through as this flag).
 
 - `cmd_new`: parse `--size` alongside `--memory`; strip optional
   trailing `G`. Default unchanged at `16G`.
-- Use in conjunction with bakeri.sh v0.1.2's `[disk] size` field
+- Use in conjunction with snapcompose v0.1.2's `[disk] size` field
   to declare a project-wide preference.
 
 ## v0.1.0 — 2026-05-21
@@ -291,7 +291,7 @@ Initial public release. Plugin protocol, snapshot chain, the lot.
 ### TOML parser (`lib/toml.sh`) — generic, downstream-reusable
 - `toml_get`, `toml_get_array`, `toml_get_in_section`, `toml_get_array_in_section`.
 - `toml_validate` (rejects duplicate table headers per TOML 1.0).
-- Downstream-reusable: bakeri.sh + ai.rlock source via `${RL_LIB_DIR}/toml.sh`.
+- Downstream-reusable: snapcompose + ai.rlock source via `${RL_LIB_DIR}/toml.sh`.
 
 ### Removed
 - `ephemeral` snapshot strategy. Had zero adopting plugins; behaviour better expressed as either `cached` with proper `key_files` or as a `start` hook. Old plugin.toml declaring it now fails with "unknown snapshot strategy".

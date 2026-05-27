@@ -9,7 +9,7 @@ set -euo pipefail
 #
 #   * rlock itself — `bin/rl` uses these to parse `plugin.toml`
 #     manifests and project-local rlock state.
-#   * Distributions on top of rlock (bakeri.sh, ai.rlock) — source via
+#   * Distributions on top of rlock (snapcompose, ai.rlock) — source via
 #     `source "${RL_LIB_DIR}/toml.sh"` (RL_LIB_DIR is exported by rlock
 #     into every plugin's environment) for distribution-specific config
 #     files such as `bakeri.toml`. Don't reach into rlock's plugin
