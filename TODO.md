@@ -259,30 +259,48 @@ In-place update of leaf incremental layers.
    over 30 days) to know if this saves real disk vs being a clever
    optimization with no observable benefit.
 
-## (?) snapshot_walk_chain wall-clock overhead — measured 186 ms on rails-pg-sample warm
+## [done in v0.1.5] snapshot_walk_chain wall-clock overhead
 
-Out of 820 ms of rl/bake overhead at warm-restore wall-clock (M3,
-2026-05-27 round 12 bench), `snapshot_walk_chain` itself takes
-186 ms. Most of that is forking subprocesses for `plugin_has_snapshot`,
+Original size: 186 ms on rails-pg-sample warm (M3, R12 bench).
+Mostly subprocess forks for `plugin_has_snapshot`,
 `plugin_snapshot_strategy`, `plugin_snapshot_kind`, `run_hook
-snapshot_key` for each plugin in the chain — each re-reads the
-plugin's `plugin.toml`, each is a `bash -c` style hop.
+snapshot_key` per plugin in the chain — each reads the plugin's
+`plugin.toml`, each is a `bash -c` hop.
 
-Question mark because **the user explicitly does not want a
-persistent cache for this** (memory: "мне претит идея вводить кеш на
-такое"). Possible non-cache approaches:
+**Shipped in v0.1.5** as in-process memoize (NOT a persistent
+cache). `lib/toml.sh` gained `_TOML_CACHE` (file path → file
+content) and `lib/plugin.sh` gained `_PLUGIN_DIR_CACHE` +
+`plugin_meta_prefetch`. Hot loops (`detect_triggers`,
+`snapshot_walk_chain`) call prefetch at entry; the bash assoc
+arrays inherit into the `$(...)` subshells where `plugin_dir` /
+`toml_get*` get called, and those parse from the in-memory
+strings via bash builtins instead of forking sed/awk. The cache
+lives only for the lifetime of one `rl new` process — child
+subshells read it but writes don't propagate back to the parent.
 
-- **In-process memoize** within a single `rl new` invocation:
-  read each plugin's `plugin.toml` once into a bash associative
-  array, serve subsequent `plugin_*` queries from there. Not a
-  persistent cache — pure deduplication of redundant file reads
-  within the same process. Estimated saving: 50–80 ms.
-- **Inline hook-presence detection** to skip `run_hook` fork when
-  the hook isn't defined (plugin's snapshot_* hooks are absent for
-  most plugins).
-- **Profile first with `bash -x`** to confirm where the 186 ms
-  actually goes — could be one stray `qemu-img info` or `stat -t`
-  on a per-layer basis. Don't optimize the wrong loop.
+Measured save: ~70 ms wall-clock + tighter variance (per-fork
+CPU contention that produced bimodal cohorts in v0.1.4 is gone).
 
-Defer until profiled. The 186 ms is real but the right intervention
-depends on the breakdown.
+### Possible follow-up (defer until profiled)
+
+Remaining framework overhead after v0.1.5 is ~750 ms (M3
+full-stack warm bake-run after R16 = 1854 ms total, aq phase
+~1100 ms). The non-aq slice splits roughly:
+- bake-run preprocess (~80 ms — synthesise prebuild + first detect_triggers, paid before rl is called)
+- rl new orchestration (~250 ms — aq new + resolve_deps + check_* + spinners)
+- snapshot_walk_chain core (~100 ms — what's left after the memoize)
+- do_ssh + exec wrapper (~26 ms)
+
+To attack further, profile with `bash -x` + timestamps inside
+`rl new` (not just at entry/exit). The biggest single block is
+`aq new` itself (port allocation, meta.json write, uefi-vars
+copy on x86_64) — that's aq territory, not rlock's. Inside
+rlock, candidate wins: skip `aq stop` when VM isn't running
+(we currently call it as a no-op; ~30 ms each), elide spinner
+in non-tty mode (the spinner_start/stop pair is a fork pair
+per layer, ~5 ms × N layers).
+
+None of this is worth doing speculatively — the 80 % win came
+from the elimination of the *known* hot loops; what's left is
+diffuse and would take more time to optimize than it'd save
+per call.
