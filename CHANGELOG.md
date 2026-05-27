@@ -6,6 +6,22 @@ All notable changes to rlock — one-liner per change. Date-stamped releases gro
 
 - (nothing pending)
 
+## v0.1.8 — 2026-05-27
+
+### Docs-only release: close C9 TODO
+
+`TODO.md`: the "snapshot_walk_chain wall-clock overhead" entry
+that was added with a question mark in v0.1.5's commit is now
+closed — the in-process TOML memoize shipped in v0.1.5 brought
+the measured 186 ms down to ~100 ms. The TODO entry now points
+at the v0.1.5 implementation and lists candidate follow-ups for
+the remaining diffuse overhead (aq new internals, spinner forks,
+etc.) which are not worth chasing speculatively.
+
+Companion to aq's same-day RFC for postcopy warm-restore (in
+aq/docs/specs/2026-05-27-postcopy-warm-restore-rfc.md). No code
+changes in rlock for this release.
+
 ## v0.1.7 — 2026-05-27
 
 ### Switch from AQ_MEMORY_PATCH_MODE to AQ_MEMORY_SNAPSHOT enum
