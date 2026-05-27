@@ -6,6 +6,24 @@ All notable changes to rlock — one-liner per change. Date-stamped releases gro
 
 - (nothing pending)
 
+## v0.1.10 — 2026-05-27
+
+### Chain-reconstruction base uses single-thread `zstd -dc`
+
+Pairs with aq v2.5.38. The chain base (compose layer in our
+fixture) is decompressed in `_snapshot_reconstruct_memory_chain`
+to seed the patch-apply pipeline. v0.1.6 used `pzstd -dc` for
+speed, but pzstd parallel decompression on ubuntu-latest CI
+runners produced a reference whose downstream patch-apply
+tripped zstd error 36 "Restored data doesn't match checksum"
+(R18 cold-zstd-patch failure, 2026-05-27). Switch to
+single-thread `zstd -dc` exclusively — the bytes are
+deterministic at the cost of ~1 s extra per chain restore.
+
+Same trade as aq v2.5.38: only fires under
+`AQ_MEMORY_SNAPSHOT=zstd-patch`; default `zstd` mode is
+unchanged.
+
 ## v0.1.9 — 2026-05-27
 
 ### B5 patch-mode fixes for chain depth > 2
