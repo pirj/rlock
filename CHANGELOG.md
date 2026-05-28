@@ -6,6 +6,50 @@ All notable changes to rlock — one-liner per change. Date-stamped releases gro
 
 - (nothing pending)
 
+## v0.1.12 — 2026-05-28
+
+### Drop PATCH_DIAG instrumentation
+
+The encode/decode-ref `sha256` log lines added in v0.1.10 to chase
+the R18 cold-zstd-patch failure are no longer needed — v0.1.11
+identified and fixed the real bug (leaf-direct chain reconstruction).
+Removed from `_snapshot_reconstruct_memory_chain`.
+
+## v0.1.11 — 2026-05-28
+
+### Chain reconstruction: apply leaf patch directly against base
+
+R18 cold-zstd-patch failures on CI ("Decoding error (36): Restored
+data doesn't match checksum") root-caused to a logic bug in
+`_snapshot_reconstruct_memory_chain`. `snapshot_save` walks back
+to the most-recent FULL ancestor and encodes the leaf's memory
+delta against THAT ancestor's raw, but the restore side was
+applying patches SEQUENTIALLY through the chain
+(base → patch1 → out → patch2 → out → ...), feeding each
+intermediate `.zstpatch` an input it was never encoded against.
+
+The failure manifested on chains with depth ≥3: CI fixture had
+4 live layers (compose → git → pg-prewarm → schema-loaded; the
+`git` plugin auto-detected because the project has a `.git/`
+directory), so the second patch-apply step fed `pg-prewarm.zstpatch`
+the result of applying `git.zstpatch` to compose.raw, but
+`pg-prewarm.zstpatch` was encoded against compose.raw, not
+`git_reconstructed.raw`. zstd's XXH64 frame checksum caught the
+mismatch.
+
+Fix: walk back to the chain base (first `memory.bin.zst` ancestor),
+decompress it once, and apply the LEAF's `.zstpatch` directly
+against the base — skipping every intermediate `.zstpatch` layer.
+Matches the encoder's semantics. Intermediate qcow2 disks are
+still rebased through normal `snapshot_walk_vm_rebase`.
+
+On the local 2-layer M3 fixture the bug never reproduced (only
+one patch-apply step, which happened to be correct). On the CI
+4-layer fixture it reproduced consistently. Post-fix M3 R18 warm
+mean dropped from 6.18 s → 4.59 s (chain reconstruction now does
+one decompress + one patch-apply instead of one decompress + N
+apply steps).
+
 ## v0.1.10 — 2026-05-27
 
 ### Chain-reconstruction base uses single-thread `zstd -dc`

@@ -238,22 +238,9 @@ _snapshot_reconstruct_memory_chain() {
     echo "  reconstructing memory chain: base=$(basename "$(dirname "$base")")/$(basename "$base") -> leaf=$(basename "$(dirname "$leaf_cache_dir")")/$(basename "$leaf_cache_dir")" >&2
 
     # Decompress the chain base into a working raw file. Single-thread
-    # `zstd -dc` rather than `pzstd -dc` even when pzstd is available:
-    # the resulting bytes are the patch-from reference, and the patches
-    # were created against a reference produced by single-thread zstd
-    # (see aq's snapshot-create patch path). Using pzstd here would
-    # decompress in parallel, which has been observed to produce a
-    # reference whose downstream patch-apply trips zstd error 36
-    # "Restored data doesn't match checksum" on ubuntu-latest CI
-    # (benchmark-r17-r18 r18 cold path, 2026-05-27). Spend the ~1 s
-    # extra wall-clock to keep the encode/decode reference byte-identical.
+    # `zstd -dc` rather than `pzstd -dc`: keeps encode-side / decode-side
+    # reference byte-identical (worth the ~1 s vs pzstd parallel).
     zstd -dc "$base/memory.bin.zst" > "$out_raw"
-    # DIAG: sha256 of chain-base raw, matches aq's encode-side PATCH_DIAG
-    # in the log when patch round-trip succeeds. Divergence here would
-    # prove `zstd -dc` isn't deterministic for our inputs.
-    if command -v sha256sum >/dev/null 2>&1; then
-        echo "  PATCH_DIAG decode-ref sha256=$(sha256sum "$out_raw" | cut -d' ' -f1)  bytes=$(stat -c %s "$out_raw" 2>/dev/null || stat -f %z "$out_raw")" >&2
-    fi
 
     # Apply the LEAF's patch directly against the chain base. Skipping
     # intermediate .zstpatch layers is correct: each was encoded against
