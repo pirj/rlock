@@ -201,38 +201,41 @@ _snapshot_parent_dir() {
 # Reconstruct a leaf live layer's raw memory.bin via patch chain.
 # Walks back from leaf via meta.json's parent_plugin/parent_key fields
 # until it finds an ancestor stored as full memory.bin.zst (the "base"
-# of the chain). Decompresses that base into a temp file, then applies
-# each forward layer's memory.bin.zstpatch in sequence to produce the
-# leaf's raw memory state. Writes the result to $out_raw.
+# of the chain).
 #
-# Returns 1 if any link in the chain is missing.
+# Each patch was encoded by the save side against the most-recent full
+# ancestor's raw memory (see snapshot_save's "_wp/_wk while loop"
+# above). So restore applies the LEAF's patch directly against the
+# chain base — intermediate .zstpatch layers in the chain are
+# *bypassed*; they exist only so the next sibling layer can walk back
+# to the base. Their disk content (the next layer's qcow2 backing) is
+# still consumed by the disk-rebase path; only the memory.bin layer
+# uses this single-step direct-to-base application.
 #
-# Per zstd 1.5+ behaviour, --patch-from streams are single-threaded;
-# expect ~2-3 s per chain step on M3 with 1.6 GiB raw layers.
+# Returns 1 if any link in the chain is missing or the decode fails.
 _snapshot_reconstruct_memory_chain() {
     local leaf_cache_dir="$1" out_raw="$2"
-    local -a chain=("$leaf_cache_dir")
-    local cur="$leaf_cache_dir"
-    # Walk back until we hit a layer with a full memory.bin.zst (no
-    # .zstpatch) — that's the chain base.
-    while [[ -f "$cur/memory.bin.zstpatch" && ! -f "$cur/memory.bin.zst" ]]; do
+    # Walk back to the chain base (most-recent ancestor with full
+    # memory.bin.zst). We don't accumulate intermediate links into a
+    # chain array — we apply the LEAF's patch directly against the
+    # base, matching how the encoder produced it.
+    local base="$leaf_cache_dir"
+    while [[ -f "$base/memory.bin.zstpatch" && ! -f "$base/memory.bin.zst" ]]; do
         local parent
-        parent=$(_snapshot_parent_dir "$cur")
+        parent=$(_snapshot_parent_dir "$base")
         if [[ -z "$parent" || ! -d "$parent" ]]; then
-            echo "  ERROR: patch chain broken at $cur — no parent cache entry" >&2
+            echo "  ERROR: patch chain broken at $base — no parent cache entry" >&2
             return 1
         fi
-        cur="$parent"
-        chain=("$parent" "${chain[@]}")
+        base="$parent"
     done
 
-    local base="${chain[0]}"
     if [[ ! -f "$base/memory.bin.zst" ]]; then
         echo "  ERROR: chain base $base lacks memory.bin.zst" >&2
         return 1
     fi
 
-    echo "  reconstructing memory chain: ${#chain[@]} layer(s) from $(basename "$(dirname "$base")")/$(basename "$base") -> $(basename "$(dirname "$leaf_cache_dir")")/$(basename "$leaf_cache_dir")" >&2
+    echo "  reconstructing memory chain: base=$(basename "$(dirname "$base")")/$(basename "$base") -> leaf=$(basename "$(dirname "$leaf_cache_dir")")/$(basename "$leaf_cache_dir")" >&2
 
     # Decompress the chain base into a working raw file. Single-thread
     # `zstd -dc` rather than `pzstd -dc` even when pzstd is available:
@@ -252,7 +255,13 @@ _snapshot_reconstruct_memory_chain() {
         echo "  PATCH_DIAG decode-ref sha256=$(sha256sum "$out_raw" | cut -d' ' -f1)  bytes=$(stat -c %s "$out_raw" 2>/dev/null || stat -f %z "$out_raw")" >&2
     fi
 
-    # Apply each forward patch.
+    # Apply the LEAF's patch directly against the chain base. Skipping
+    # intermediate .zstpatch layers is correct: each was encoded against
+    # the same full ancestor (the encoder also walks back to the most-
+    # recent full ancestor), so each one's content is a delta from
+    # base.raw to that layer's snapshotted memory. We only need the
+    # LEAF's patch to reconstruct the leaf's memory.
+    #
     # --long=31 matches the encoder's 2 GiB window setting (see aq's
     # `Live snapshot: computing memory delta` block) — without it
     # zstd refuses to decode any frame whose window exceeds the
@@ -261,22 +270,21 @@ _snapshot_reconstruct_memory_chain() {
     # the body — so we have to check the zstd exit explicitly and
     # return 1 on failure, otherwise an empty raw file gets staged
     # and the next aq start tries to migrate from a 0-byte memory.bin.
-    local i tmp_next
-    for ((i=1; i<${#chain[@]}; i++)); do
-        local link="${chain[i]}"
-        local patch="$link/memory.bin.zstpatch"
-        if [[ ! -f "$patch" ]]; then
-            echo "  ERROR: chain link $link has no memory.bin.zstpatch" >&2
+    if [[ "$leaf_cache_dir" != "$base" ]]; then
+        local leaf_patch="$leaf_cache_dir/memory.bin.zstpatch"
+        if [[ ! -f "$leaf_patch" ]]; then
+            echo "  ERROR: leaf $leaf_cache_dir has no memory.bin.zstpatch" >&2
             return 1
         fi
+        local tmp_next
         tmp_next=$(mktemp -t aq-patch-tmp-XXXXXX)
-        if ! zstd -dc --long=31 --patch-from="$out_raw" "$patch" > "$tmp_next"; then
-            echo "  ERROR: patch apply failed at link $link" >&2
+        if ! zstd -dc --long=31 --patch-from="$out_raw" "$leaf_patch" > "$tmp_next"; then
+            echo "  ERROR: leaf patch apply failed at $leaf_cache_dir" >&2
             rm -f "$tmp_next"
             return 1
         fi
         mv "$tmp_next" "$out_raw"
-    done
+    fi
 }
 
 # --- VM seam ---
