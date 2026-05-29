@@ -239,7 +239,12 @@ git_sync_source_to_vm() {
     ) 9>"$git_root/.git/snapcompose-remote.lock"
 
     info "Pushing HEAD into VM '$vm'..."
-    GIT_SSH_COMMAND="ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p $port" \
-        git -C "$git_root" push -f "$remote_name" HEAD:refs/heads/main >/dev/null 2>&1 \
-        || warn "git push to VM failed — proceeding with whatever code is in the VM"
+    # Surface the push's stderr — when this fails the next plugin in
+    # the chain typically fails too (cd into a directory that the push
+    # was supposed to deliver), so a silent failure is much harder to
+    # diagnose than a visible one.
+    if ! GIT_SSH_COMMAND="ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p $port" \
+            git -C "$git_root" push -f "$remote_name" HEAD:refs/heads/main 2>&1; then
+        warn "git push to VM failed — proceeding with whatever code is in the VM"
+    fi
 }
