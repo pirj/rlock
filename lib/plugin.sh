@@ -94,6 +94,29 @@ check_protocol_versions() {
     done
 }
 
+# Read the `needs_source` field from a plugin's plugin.toml. Returns
+# "true" or "false" — defaults to false when the field is absent or
+# the manifest can't be read.
+#
+# Plugins set this true when their snapshot_build requires the project
+# source tree to be present at SNAPC_VM_PROJECT_DIR inside the VM
+# (e.g. ruby-bundler needs Gemfile.lock, docker-compose needs the
+# Dockerfile + compose file). snapc-run inspects this across the
+# activated plugin chain to decide whether to push HEAD into the VM
+# before chain walking.
+#
+# Optional field — silently absent on plugins that predate the
+# convention. Backwards-compatible.
+plugin_needs_source() {
+    local plugin="$1"
+    local pdir
+    pdir=$(plugin_dir "$plugin") || { echo "false"; return; }
+    local v
+    v=$(toml_get "$pdir/plugin.toml" "needs_source")
+    [ "$v" = "true" ] && { echo "true"; return; }
+    echo "false"
+}
+
 # Returns 0 if plugin declares a [snapshot] section, 1 otherwise.
 plugin_has_snapshot() {
     local plugin="$1"
