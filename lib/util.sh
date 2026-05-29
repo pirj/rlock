@@ -239,12 +239,17 @@ git_sync_source_to_vm() {
     ) 9>"$git_root/.git/snapcompose-remote.lock"
 
     info "Pushing HEAD into VM '$vm'..."
-    # Surface the push's stderr — when this fails the next plugin in
-    # the chain typically fails too (cd into a directory that the push
-    # was supposed to deliver), so a silent failure is much harder to
-    # diagnose than a visible one.
+    # --receive-pack: SSH non-interactive sessions for the rlock user in
+    # Alpine guests don't have /usr/bin on PATH, so a bare `git push`
+    # over SSH fails with "bash: git-receive-pack: command not found".
+    # Spelling the absolute path bypasses the PATH lookup. Surface
+    # stderr so failures are visible — they cascade into the next
+    # plugin's snapshot_build cd'ing into a directory the push was
+    # supposed to deliver.
     if ! GIT_SSH_COMMAND="ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p $port" \
-            git -C "$git_root" push -f "$remote_name" HEAD:refs/heads/main 2>&1; then
+            git -C "$git_root" push -f \
+                --receive-pack=/usr/bin/git-receive-pack \
+                "$remote_name" HEAD:refs/heads/main 2>&1; then
         warn "git push to VM failed — proceeding with whatever code is in the VM"
     fi
 }
