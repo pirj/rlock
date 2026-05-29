@@ -17,7 +17,13 @@ apk add git
 su -l rlock -c '
     mkdir -p ~/repo
     cd ~/repo
-    git init
+    # -b main pins the initial branch so the framework auto-push
+    # (which pushes HEAD:main) matches the current HEAD and the
+    # receive.denyCurrentBranch updateInstead hook actually updates
+    # the working tree. Without -b main, git init defaults to master
+    # (or whichever init.defaultBranch is set globally), and the push
+    # to main creates a stale branch with no working-tree update.
+    git init -b main
     git config receive.denyCurrentBranch updateInstead
 '
 BUILD
