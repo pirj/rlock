@@ -303,4 +303,15 @@ per layer, ~5 ms × N layers).
 None of this is worth doing speculatively — the 80 % win came
 from the elimination of the *known* hot loops; what's left is
 diffuse and would take more time to optimize than it'd save
+
+## Potential performance improvements (2026-05-29 research)
+
+Catalogued from a 4-track research dive on cold/warm latency. Source: [`../meta/2026-05-29-optimization-research-top10.md`](../meta/2026-05-29-optimization-research-top10.md). Not in flight. Items here are the ones whose natural home is rlock (framework, snapshot orchestration, plugin chain walking); cross-cutting items live in [`../aq/ROADMAP.md`](../aq/ROADMAP.md), [`../snapcompose/TODO.md`](../snapcompose/TODO.md), [`../setup-snapcompose/TODO.md`](../setup-snapcompose/TODO.md).
+
+- [ ] **Parallel pre-decompress `memory.bin.zst` overlapped with snapshot walk** — M3 phase trace (2026-05-29) shows 644 ms of bash bookkeeping (snapc startup 331 ms + `aq new` 54 ms + snapshot walk + qcow2 rebase 313 ms) running strictly BEFORE the 466 ms `pzstd -dc` decompress that aq currently does as part of `aq_start`. Fork `pzstd -dc` early — at the start of `snapshot_walk_chain` for kind=live leaf layers — let it run to disk in parallel, wait at the `aq start` boundary. Expected: M3 -250 ms warm (-11 % from 2.3 s baseline). ~30 LoC in `lib/snapshot.sh`. The leaf-hardlink-then-decompress path is what makes this possible cleanly; the patch-chain reconstruction path needs the decompressed base anyway so reaps the same parallelism.
+- [ ] **Hot pool of pre-resumed VMs** — Daytona model (sub-90 ms perceived `create`). Pre-resume N VMs per popular project on the host; `rl new` hands out a running VM and starts resuming a replacement in the background. Sub-second perceived warm. Architecture change (~1000 LoC); really belongs in `rlock-server` (commercial control plane) since it needs a daemon to manage the pool. Note here for cross-reference. [Daytona sub-90 ms blog](https://medium.com/@kacperwlodarczyk/sub-90ms-cloud-code-execution-how-daytona-replaced-docker-in-our-ai-agent-stack-b6f343e4e547).
+
+### Honorable mention — instrumentation hygiene
+
+- [ ] **AQ_TIMING-style phase markers for rlock framework** — today rlock emits no per-phase timing. The M3 phase trace was done via external `python3` line-stamping. A built-in `RL_TIMING=1` that logs to stderr at start of `snapshot_walk_chain`, end of staging, etc. would make future profiling trivial. ~20 LoC in `bin/rl` + `lib/snapshot.sh`. Cheap diagnostic infrastructure.
 per call.
