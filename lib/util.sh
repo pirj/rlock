@@ -230,11 +230,13 @@ git_sync_source_to_vm() {
     local remote_url="ssh://rlock@localhost:$port/home/rlock/repo"
 
     # Idempotent remote setup, flock-protected.
+    # NB: .git/config.lock is git's own lockfile — taking it ourselves
+    # would race with git's internal operations. Use a separate path.
     (
         flock 9
         git -C "$git_root" remote remove "$remote_name" 2>/dev/null || :
         git -C "$git_root" remote add "$remote_name" "$remote_url"
-    ) 9>"$git_root/.git/config.lock"
+    ) 9>"$git_root/.git/snapcompose-remote.lock"
 
     info "Pushing HEAD into VM '$vm'..."
     GIT_SSH_COMMAND="ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p $port" \
