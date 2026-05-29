@@ -198,3 +198,46 @@ do_ssh() {
             -p "$port" rlock@localhost "$@"
     fi
 }
+
+# Auto-deliver the host's current git HEAD into the VM at /home/rlock/repo.
+# Used by cmd_new (post-walk catch-all push) and snapshot_walk_chain
+# (during-walk push at the first cache miss boundary so that source-needing
+# plugins find files when they build).
+#
+# Idempotent: setting up the rl-<vm> remote is wrapped in a flock on
+# .git/config.lock for concurrent multi-VM `rl new` invocations from the
+# same repo. Push itself is safe to run in parallel against different
+# remotes — different SSH ports, different destinations.
+#
+# Silently no-ops when:
+#   - cwd isn't inside a git repo, OR
+#   - the VM SSH port can't be read (VM not provisioned far enough), OR
+#   - the git plugin's snapshot_build hasn't run (no bare-ish repo in VM
+#     to receive). In practice this only matters when called before any
+#     iteration of the chain walks the git plugin's layer.
+git_sync_source_to_vm() {
+    local vm="$1"
+    local git_root
+    git_root=$(git rev-parse --show-toplevel 2>/dev/null) || return 0
+
+    local port
+    port=$(get_ssh_port "$vm" 2>/dev/null) || {
+        warn "git_sync_source_to_vm: SSH port unknown for $vm — skipping"
+        return 0
+    }
+
+    local remote_name="rl-$vm"
+    local remote_url="ssh://rlock@localhost:$port/home/rlock/repo"
+
+    # Idempotent remote setup, flock-protected.
+    (
+        flock 9
+        git -C "$git_root" remote remove "$remote_name" 2>/dev/null || :
+        git -C "$git_root" remote add "$remote_name" "$remote_url"
+    ) 9>"$git_root/.git/config.lock"
+
+    info "Pushing HEAD into VM '$vm'..."
+    GIT_SSH_COMMAND="ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p $port" \
+        git -C "$git_root" push -f "$remote_name" HEAD:refs/heads/main >/dev/null 2>&1 \
+        || warn "git push to VM failed — proceeding with whatever code is in the VM"
+}

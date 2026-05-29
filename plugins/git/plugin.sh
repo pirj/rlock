@@ -25,34 +25,17 @@ BUILD
 
 start() {
     local vm="$1"
+    # Source delivery is now handled by the framework's auto-push hook
+    # in cmd_new (see rlock/bin/rl + git_sync_source_to_vm in lib/util.sh).
+    # That path sets up an `rl-<vm>` remote and pushes HEAD non-
+    # interactively, both at the first cache-miss boundary in the chain
+    # walker and as a catch-all post-walk push for full-warm runs.
+    #
+    # Print the remote info as a one-line confirmation so users running
+    # `rl new` by hand see what was wired up.
     local port
-    port=$(get_ssh_port "$vm")
-    local remote_url="ssh://rlock@localhost:$port/home/rlock/repo"
-    local ssh_cmd="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes -p $port"
-
-    echo ""
-    info "Git remote command:"
-    echo "  git remote add rl $remote_url"
-    echo "  git config core.sshCommand \"$ssh_cmd\""
-    echo ""
-
-    local answer
-    read -rp "Add git remote now? (Y/n) " answer
-    if [[ "${answer:-Y}" =~ ^[Yy]$ ]]; then
-        git remote add rl "$remote_url" 2>/dev/null || warn "Remote 'rl' already exists"
-        git config core.sshCommand "$ssh_cmd"
-
-        # Push current branch if on one
-        local branch
-        branch=$(git symbolic-ref --short HEAD 2>/dev/null) || true
-        if [[ -n "$branch" ]]; then
-            spinner_start "Pushing $branch to guest"
-            git push rl "$branch" 2>/dev/null
-            spinner_stop "Code pushed"
-        else
-            warn "Detached HEAD — skipping push. Push manually with: git push rl HEAD:main"
-        fi
-    fi
+    port=$(get_ssh_port "$vm" 2>/dev/null) || return 0
+    info "Git remote 'rl-$vm' → ssh://rlock@localhost:$port/home/rlock/repo"
 }
 
 rm() {

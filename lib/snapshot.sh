@@ -400,6 +400,12 @@ snapshot_walk_chain() {
     local vm="$1"; shift
     local parent_plugin="" parent_key="" parent_path=""
 
+    # Source-sync gate. Reset on each walk so a fresh `rl new` starts
+    # clean. Set to 1 the first time we call into the source-sync hook
+    # (see the miss-path body below) — guarantees at most one push per
+    # walk regardless of how many subsequent miss layers we hit.
+    _SNAPSHOT_FIRST_MISS_DONE=0
+
     # Pre-slurp every discoverable plugin's plugin.toml into the
     # in-process TOML cache + plugin-dir cache. The loop below dispatches
     # 4-6 toml lookups per plugin via subshells; without prefetch each
@@ -545,6 +551,23 @@ snapshot_walk_chain() {
         # practice and avoids a python3 / coreutils-gdate dependency.
         local _build_t0=$SECONDS
         snapshot_walk_vm_boot "$vm"
+
+        # Source-sync at the first miss boundary. Plugins from this layer
+        # forward will see the host's current HEAD at /home/rlock/repo.
+        # Skip for _base + git because their own snapshot_build is what
+        # creates the receiving repo — there's nothing to push into yet.
+        # Caller (cmd_new) is responsible for declaring a
+        # snapshot_walk_chain_first_miss_hook if it wants this side effect;
+        # if the hook isn't defined, the call is a noop. Idempotent within
+        # one walk via _SNAPSHOT_FIRST_MISS_DONE.
+        if [[ "$plugin" != "_base" && "$plugin" != "git" \
+              && "${_SNAPSHOT_FIRST_MISS_DONE:-0}" -eq 0 ]]; then
+            if declare -f snapshot_walk_chain_first_miss_hook >/dev/null 2>&1; then
+                snapshot_walk_chain_first_miss_hook "$vm"
+            fi
+            _SNAPSHOT_FIRST_MISS_DONE=1
+        fi
+
         run_hook "$plugin" "snapshot_build" "$vm"
 
         if [[ "$kind" == "live" ]]; then

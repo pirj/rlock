@@ -179,6 +179,23 @@ cmd_new() {
     # stopped through the chain and the single post-walk `aq start`
     # below either resumes via incoming-memory.bin (kind=live cache
     # hit) or cold-boots the rebased disk.
+
+    # Wire the walker's first-miss hook to source-sync when the git
+    # plugin is in the chain. The walker calls this at the first
+    # cache-miss boundary of a non-{_base,git} plugin so source-needing
+    # snapshot_builds find files at /home/rlock/repo. If everything is a
+    # cache hit, the hook never fires — we catch that case post-walk.
+    local git_plugin_in_chain=0
+    local _p
+    for _p in "${resolved[@]}"; do
+        [[ "$_p" == "git" ]] && { git_plugin_in_chain=1; break; }
+    done
+    if [[ $git_plugin_in_chain -eq 1 ]]; then
+        snapshot_walk_chain_first_miss_hook() {
+            git_sync_source_to_vm "$1"
+        }
+    fi
+
     spinner_start "Walking snapshot layers"
     snapshot_walk_chain "$vm_name" "_base" "${resolved[@]}"
     spinner_stop "Layers ready"
@@ -187,6 +204,16 @@ cmd_new() {
     aq start "$vm_name" >/dev/null
     wait_for_ssh "$vm_name" 60 >/dev/null
     spinner_stop "VM ready"
+
+    # Post-walk source sync. Full-warm path: every snapshot was a cache
+    # hit, the walker's first-miss hook never fired, but the host's HEAD
+    # may have advanced since the last build (e.g. a one-line edit in
+    # app/models/user.rb that no snapshot_key reflects). Push now so the
+    # running VM has the latest source for the upcoming user command /
+    # start hooks. No-op if the walker already pushed.
+    if [[ $git_plugin_in_chain -eq 1 && "${_SNAPSHOT_FIRST_MISS_DONE:-0}" -eq 0 ]]; then
+        git_sync_source_to_vm "$vm_name"
+    fi
 
     # Run provision hooks for plugins WITHOUT [snapshot] (legacy + side-effect-only)
     local plugin
