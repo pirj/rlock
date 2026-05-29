@@ -240,15 +240,16 @@ git_sync_source_to_vm() {
 
     info "Pushing HEAD into VM '$vm'..."
     # --receive-pack: SSH non-interactive sessions for the rlock user in
-    # Alpine guests don't have /usr/bin on PATH, so a bare `git push`
-    # over SSH fails with "bash: git-receive-pack: command not found".
-    # Spelling the absolute path bypasses the PATH lookup. Surface
-    # stderr so failures are visible — they cascade into the next
-    # plugin's snapshot_build cd'ing into a directory the push was
-    # supposed to deliver.
+    # Alpine guests don't have git's exec path on PATH, so a bare push
+    # fails with "git-receive-pack: command not found". Wrap via `env`
+    # so the receive-pack runs with /usr/bin + /usr/libexec/git-core on
+    # PATH no matter how the guest packs git. Surface stderr so failures
+    # are visible — they cascade into the next plugin's snapshot_build
+    # cd'ing into a directory the push was supposed to deliver.
+    local recv_pack='env PATH=/usr/local/bin:/usr/bin:/bin:/usr/libexec/git-core git-receive-pack'
     if ! GIT_SSH_COMMAND="ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p $port" \
             git -C "$git_root" push -f \
-                --receive-pack=/usr/bin/git-receive-pack \
+                --receive-pack="$recv_pack" \
                 "$remote_name" HEAD:refs/heads/main 2>&1; then
         warn "git push to VM failed — proceeding with whatever code is in the VM"
     fi
