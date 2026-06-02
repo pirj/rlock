@@ -6,6 +6,36 @@ All notable changes to rlock — one-liner per change. Date-stamped releases gro
 
 - (nothing pending)
 
+## v0.1.15 — 2026-06-02
+
+### Atomic-rename of snapshot artifacts (close cache-hit reader window)
+
+v0.1.14's flock around `snapshot_save` serialised concurrent
+writers but still had a "file briefly missing" window between
+`rm -f $dir/disk.qcow2` and the subsequent `qemu-img convert`
+finishing the new file. A concurrent chain walker in another
+process that already lookuped this slot as a cache hit (`disk.qcow2`
+present) would then try `qemu-img create -b $cached_path` and
+fail with:
+
+```
+qemu-img: ... Could not open '<cache>/disk.qcow2': No such file or directory
+Could not open backing image.
+```
+
+Surfaced by snapcompose-benchmark `+1 par cold` run 26809962550
+(post-v0.1.14). Two `snapc run`s both hit mise-base, one's
+`snapshot_save` was mid-rewrite, the other's chain walker
+tried to use mise-base as a backing for its own next layer.
+
+`snapshot_save` now writes every artifact to `.tmp.$$` paths
+and atomic-renames them onto the canonical filenames. The slot
+is never observed in a torn intermediate state — a concurrent
+reader sees either the previous or new disk.qcow2, never absent.
+Stale artifacts that the new save doesn't produce (e.g. memory.bin
+from a prior live entry when re-saving as cold) get cleaned up
+AFTER the renames so the post-save state is consistent.
+
 ## v0.1.14 — 2026-06-02
 
 ### flock around snapshot_save for concurrent multi-VM provisioning

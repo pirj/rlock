@@ -95,18 +95,29 @@ snapshot_save() {
         _have_flock=1
     fi
 
-    # Overwrite-safe: remove any prior artifacts at this slot so the new
-    # save fully replaces them. Important for `rl warm rebuild`, which
-    # promotes the running VM into an existing cache entry (potentially
-    # changing kind cold→live or vice versa — the stale memory.bin from
-    # a previous live capture would mislead rebase if left in place).
-    rm -f "$dir/disk.qcow2" "$dir/memory.bin" "$dir/memory.bin.zst" "$dir/memory.bin.zstpatch" "$dir/memory.format" "$dir/meta.json"
-
+    # Write new artifacts to .tmp.$$ paths and atomic-rename them onto
+    # the canonical filenames at the end. This avoids a "file briefly
+    # missing" window during which a CONCURRENT chain walker that
+    # already lookuped this slot as a cache hit would try to qemu-img
+    # create -b on a missing backing file and fail with "No such file
+    # or directory" / "Could not open backing image". The slot's
+    # flock above serialises writers; atomic-rename ensures readers
+    # see either the prior or new version of disk.qcow2, never absent.
+    #
+    # Stale artifacts that the new save WON'T produce (memory.bin from
+    # a prior live entry when re-saving as cold, etc.) get rm'd after
+    # the renames so the post-save state is clean.
+    local _suffix="tmp.$$"
     case "$kind" in
         cold)
             local src_disk
             src_disk=$(snapshot_walk_vm_disk "$vm")
-            qemu-img convert -O qcow2 "$src_disk" "$dir/disk.qcow2"
+            qemu-img convert -O qcow2 "$src_disk" "$dir/disk.qcow2.$_suffix"
+            mv "$dir/disk.qcow2.$_suffix" "$dir/disk.qcow2"
+            # Cold has no memory state — drop any stale memory.bin* /
+            # memory.format from a prior live save at this slot.
+            rm -f "$dir/memory.bin" "$dir/memory.bin.zst" \
+                  "$dir/memory.bin.zstpatch" "$dir/memory.format"
             ;;
         live)
             # aq snapshot create captures memory + disk while VM is running,
@@ -178,14 +189,31 @@ snapshot_save() {
             "${_save_env[@]}" aq snapshot create "$vm" "$tag" >/dev/null
             local aq_dir
             aq_dir=$(snapshot_aq_tag_dir "$tag")
-            mv "$aq_dir/disk.qcow2" "$dir/disk.qcow2"
+            # Stage every artifact under .tmp.$$ inside the slot, then
+            # atomic-rename so a concurrent reader never sees the slot
+            # in a torn intermediate state.
+            mv "$aq_dir/disk.qcow2" "$dir/disk.qcow2.$_suffix"
+            mv "$dir/disk.qcow2.$_suffix" "$dir/disk.qcow2"
+            # Memory state — exactly one of (zstpatch+format, zst, raw)
+            # depending on aq's compression mode. Stage + rename, then
+            # clean up any siblings from a prior save that this kind
+            # doesn't produce.
             if [[ -f "$aq_dir/memory.bin.zstpatch" ]]; then
-                mv "$aq_dir/memory.bin.zstpatch" "$dir/memory.bin.zstpatch"
-                mv "$aq_dir/memory.format" "$dir/memory.format" 2>/dev/null || true
+                mv "$aq_dir/memory.bin.zstpatch" "$dir/memory.bin.zstpatch.$_suffix"
+                mv "$dir/memory.bin.zstpatch.$_suffix" "$dir/memory.bin.zstpatch"
+                if [[ -f "$aq_dir/memory.format" ]]; then
+                    mv "$aq_dir/memory.format" "$dir/memory.format.$_suffix"
+                    mv "$dir/memory.format.$_suffix" "$dir/memory.format"
+                fi
+                rm -f "$dir/memory.bin" "$dir/memory.bin.zst"
             elif [[ -f "$aq_dir/memory.bin.zst" ]]; then
-                mv "$aq_dir/memory.bin.zst" "$dir/memory.bin.zst"
+                mv "$aq_dir/memory.bin.zst" "$dir/memory.bin.zst.$_suffix"
+                mv "$dir/memory.bin.zst.$_suffix" "$dir/memory.bin.zst"
+                rm -f "$dir/memory.bin" "$dir/memory.bin.zstpatch" "$dir/memory.format"
             elif [[ -f "$aq_dir/memory.bin" ]]; then
-                mv "$aq_dir/memory.bin" "$dir/memory.bin"
+                mv "$aq_dir/memory.bin" "$dir/memory.bin.$_suffix"
+                mv "$dir/memory.bin.$_suffix" "$dir/memory.bin"
+                rm -f "$dir/memory.bin.zst" "$dir/memory.bin.zstpatch" "$dir/memory.format"
             fi
             aq snapshot rm --force "$tag" >/dev/null 2>&1 || true
             ;;
@@ -195,7 +223,7 @@ snapshot_save() {
             ;;
     esac
 
-    cat > "$dir/meta.json" <<META
+    cat > "$dir/meta.json.$_suffix" <<META
 {
   "plugin": "$plugin",
   "key": "$key",
@@ -205,6 +233,7 @@ snapshot_save() {
   "built_at": "$(date -u +%FT%TZ)"
 }
 META
+    mv "$dir/meta.json.$_suffix" "$dir/meta.json"
 
     # Release the save-side flock taken at the top of the function
     # (no-op on hosts without flock — the fd was never opened).
