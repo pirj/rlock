@@ -315,3 +315,52 @@ Catalogued from a 4-track research dive on cold/warm latency. Source: [`../meta/
 
 - [ ] **AQ_TIMING-style phase markers for rlock framework** — today rlock emits no per-phase timing. The M3 phase trace was done via external `python3` line-stamping. A built-in `RL_TIMING=1` that logs to stderr at start of `snapshot_walk_chain`, end of staging, etc. would make future profiling trivial. ~20 LoC in `bin/rl` + `lib/snapshot.sh`. Cheap diagnostic infrastructure.
 per call.
+
+## Audit-log env-var threading for auth-proxy
+
+- [ ] **Thread session context to plugins via well-known env vars.** Required by the structured audit log shipped by `ai.rlock`'s `auth-proxy` plugin (schema fixed in [ADR-0004](../meta/decisions/0004-auth-proxy-audit-log-schema.md), implementation tracked in [`../ai.rlock/TODO.md`](../ai.rlock/TODO.md)). The proxy needs to enrich every JSON-Lines event with identity, project, branch, and a per-invocation correlation token; only the framework has those values authoritatively. Define and set, on every `rl <command>` invocation, the following environment variables before plugin processes are spawned (and before `auth-proxy` reads them at request time via Caddy's `{env.*}` placeholder or via reload-on-change):
+  - `RL_CORRELATION_ID` — UUIDv4 generated once per `rl` invocation. Lets downstream (audit log, SIEM, evidence pack) join events back to the host-side session.
+  - `RL_AGENT` — short slug of the agent plugin in the active chain (`claude-code`, `codex`, …). Resolution rule: if exactly one `agent-*` plugin is active, use its slug; otherwise null. Plugins outside `ai.rlock` are free to set their own value via `plugin.toml` metadata (spec the field separately) but the framework's default is the active-`agent-*` heuristic.
+  - `RL_PROJECT` — rlock project / workspace name. Already available internally; expose as env var explicitly so plugins don't have to grovel `rl` internals.
+  - `RL_BRANCH` — current git branch when the `branch` plugin is active; null otherwise.
+  Implementation notes:
+  - Set in `bin/rl` early, before any plugin hook runs, so every plugin sees the same values within one invocation. `lib/plugin.sh` is the natural place to read them when forking hook subprocesses.
+  - Document as a public framework contract: plugin authors can read these names; the framework guarantees their semantics. Add to whichever plugin-protocol doc is canonical (currently spread between `rlock/CLAUDE.md` and the plugin protocol section of `ai.rlock/CLAUDE.md`).
+  - Caddy reload: `auth-proxy` currently reads `{env.ANTHROPIC_API_KEY}` at Caddy startup, so adding `{env.RL_*}` placeholders means Caddy needs reload-on-change, OR the per-request enrichment moves to a Caddy module / sidecar that pulls the current values from a small file the framework writes per invocation. The latter is more honest because the correlation ID changes per `rl` invocation but Caddy is long-lived. Pick mechanism in the implementation PR; the ADR's schema doesn't constrain the wire-up.
+  - Test: a bats target that runs `rl code` in a fixture and asserts the audit log contains the expected correlation ID + project + branch.
+  Not blocking anything in v0.1.x; the audit log lands with `null` for these fields until threading ships, and the rlock-server commercial pitch upgrades materially once they're populated. Cross-referenced bidirectionally with `ai.rlock/TODO.md`.
+
+## Source auto-push vs cache-hit live restore boundary
+
+- [ ] **First-miss auto-push can be overwritten by subsequent
+  cache-hit live restores.** Surfaced by snapcompose-benchmark
+  Phase 3 walking-skeleton on 2026-06-02
+  (run 26808605908 / job 79032409944). Failure shape: chain
+  walker calls `snapshot_walk_chain_first_miss_hook`
+  (`git_sync_source_to_vm`) at the first cache miss, builds
+  that layer with the new HEAD source present, snapshots. The
+  next layer is a cache HIT against a snapshot taken BEFORE the
+  new source landed; its qcow2 backing chain doesn't include
+  the pushed files. When the framework rebases the cached
+  layer's qcow2 onto the new parent and live-restores its
+  memory, the FS view that the running VM sees doesn't reflect
+  the auto-push.
+  - Concrete trace: monolith cold under v3.1.4. mise-base v2
+    rebuild → push delivers `.snapcompose-bench-marker` → chain
+    walks ruby-runtime (cache hit) + ruby-bundler (cache hit) →
+    _prebuild-fixture-marker `cmd` can't see the marker file
+    that the push put there. Files added by the auto-push are
+    masked by the cached layer's prior FS state.
+  - Workaround in fixtures: don't have post-miss steps read
+    files added by the auto-push. Encode the dependency through
+    `snapshot_key`'s `key_files` instead — the host-side hash
+    still propagates the change, and the layer rebuilds without
+    needing the file present in the VM at that moment.
+  - Proper fix sketch: re-push at every cache miss, or at the
+    LAST miss before the post-walk hooks. Cheap (`git push` is
+    fast against an up-to-date remote); idempotent
+    (`git push -f` against same ref is a no-op).
+  - Alternative: have the cache-hit rebase path detect this and
+    re-apply the push after the rebase + live-restore. More
+    surgical but more code; the simpler "push at every miss"
+    captures it without special-casing.
