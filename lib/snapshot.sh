@@ -65,6 +65,36 @@ snapshot_save() {
     local dir="$RL_CACHE_DIR/$plugin/$key"
     mkdir -p "$dir"
 
+    # Concurrent chain walks from two `rl new` invocations (e.g. par-mode
+    # multi-VM provisioning in CI) both reach this slot when the layer's
+    # key is host-wide (e.g. `_base`'s constant key, mise-base's
+    # `mise-base-v2`, docker-engine's content hash). qemu-img convert
+    # holds a "resize" lock on the destination during write, so two
+    # concurrent saves race — one wins, one fails with "Failed to get
+    # 'resize' lock" + "Could not open ... No such file or directory".
+    # flock on the slot dir's `.save.lock` serialises the writers; the
+    # second arrival writes the same content second. Final state is one
+    # valid file, only slower. `9>>` (append-open) for noclobber
+    # compatibility — same shape aq uses for its bootstrap lock.
+    #
+    # macOS doesn't ship flock(1) (util-linux only — install via
+    # `brew install flock` if you need it). On hosts without it we skip
+    # the lock acquisition: single-VM provisioning has no race, and
+    # macOS isn't a CI parallel-multi-VM target today. Linux runners
+    # (the bench environment) always have flock via util-linux.
+    #
+    # We intentionally do NOT short-circuit on "disk.qcow2 already
+    # exists" inside the lock: the `rl warm rebuild` path promotes a
+    # running VM into an existing slot (potentially flipping kind cold↔
+    # live), and that legitimate overwrite must still run.
+    local _have_flock=0
+    if command -v flock >/dev/null 2>&1; then
+        local _lock="$dir/.save.lock"
+        exec 9>>"$_lock"
+        flock 9
+        _have_flock=1
+    fi
+
     # Overwrite-safe: remove any prior artifacts at this slot so the new
     # save fully replaces them. Important for `rl warm rebuild`, which
     # promotes the running VM into an existing cache entry (potentially
@@ -175,6 +205,13 @@ snapshot_save() {
   "built_at": "$(date -u +%FT%TZ)"
 }
 META
+
+    # Release the save-side flock taken at the top of the function
+    # (no-op on hosts without flock — the fd was never opened).
+    # Closing fd 9 unblocks any peer process waiting on $_lock.
+    if [[ "$_have_flock" -eq 1 ]]; then
+        exec 9>&-
+    fi
 }
 
 # Create a new qcow2 with the given file as its backing.

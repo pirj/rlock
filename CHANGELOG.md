@@ -6,6 +6,43 @@ All notable changes to rlock — one-liner per change. Date-stamped releases gro
 
 - (nothing pending)
 
+## v0.1.14 — 2026-06-02
+
+### flock around snapshot_save for concurrent multi-VM provisioning
+
+Surfaced by snapcompose-benchmark Phase 3 walking-skeleton on
+2026-06-02 (run 26808944100, `+1 par cold`):
+
+```
+qemu-img: /home/runner/.local/share/aq/cache/_base/.../disk.qcow2:
+error while converting qcow2: Failed to get "resize" lock
+Could not open '...disk.qcow2': No such file or directory
+```
+
+Two concurrent `rl new` invocations both walk the chain, both
+reach the same `_base` (or any host-wide-keyed) cache slot, both
+call `snapshot_save → qemu-img convert -O qcow2 src $dir/disk.qcow2`.
+qemu-img holds a "resize" lock on the destination during write;
+the second arrival can't acquire the lock and fails. Worse, by
+the time the second tries to retry, the first has moved /
+deleted the target, surfacing a "No such file or directory"
+follow-on error.
+
+`snapshot_save` now opens `$dir/.save.lock` and takes a `flock`
+before any destructive work (`rm -f` stale artefacts + `qemu-img
+convert` / `aq snapshot create`). Second arrival blocks at the
+lock, then writes its own (content-equivalent) save once the
+first releases. Final state is one valid file, only slower.
+
+Host requirement: `flock` (util-linux). Always available on
+Linux; macOS hosts skip the lock acquisition (single-VM
+provisioning has no race, macOS isn't a CI parallel-multi-VM
+target today). bats coverage stays green on macOS.
+
+`9>>` (append-open) rather than `9>` so aq-style top-of-script
+`set -fC` (noclobber) in downstream callers doesn't reject the
+second arrival opening the existing lockfile.
+
 ## v0.1.12 — 2026-05-28
 
 ### Drop PATCH_DIAG instrumentation
