@@ -150,6 +150,12 @@ A shell-based CLI tool (`rl`) on top of pirj/aq. Provides the plugin protocol, l
 - [QEMU ArchWiki](https://wiki.archlinux.org/title/QEMU) -- SSH port forwarding examples, user-mode networking. MEDIUM confidence (community wiki)
 - [Writing POSIX-Compatible Shell Scripts](https://oneuptime.com/blog/post/2026-02-13-posix-shell-compatibility/view) -- sh vs bash tradeoffs. MEDIUM confidence
 
+## Linting (shellcheck)
+
+All shell scripts must pass `shellcheck --severity=warning --external-sources`. CI enforces this on every push and PR via `.github/workflows/shellcheck.yml`; run the same check locally before committing shell changes.
+
+Disable findings only with inline `# shellcheck disable=SCxxxx  # reason` directives. Do not disable warnings repo-wide. The repo-level `.shellcheckrc` only sets `external-sources=true` and `source-path=SCRIPTDIR` so sourced libs resolve correctly.
+
 ## Conventions
 
 Conventions not yet established. Will populate as patterns emerge during development.

@@ -30,8 +30,8 @@ snapshot_latest() {
     local dir="$RL_CACHE_DIR/$plugin"
     [[ -d "$dir" ]] || return 1
     local newest
-    newest=$(find "$dir" -name disk.qcow2 -type f -print 2>/dev/null \
-        | xargs -r ls -t 2>/dev/null \
+    newest=$(find "$dir" -name disk.qcow2 -type f -print0 2>/dev/null \
+        | xargs -0 -r ls -t 2>/dev/null \
         | head -1)
     [[ -n "$newest" ]] && { echo "$newest"; return 0; } || return 1
 }
