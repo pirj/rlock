@@ -416,3 +416,36 @@ per call.
   in the window — narrow down which process / step is writing.
   Until root-caused, snapcompose-benchmark `+1 seq cold` and
   `+N par cold` will continue failing with the same diagnostic.
+
+## Git push to VM: EBADMSG on .git/objects/info/alternates after restore
+
+- [ ] **Git "Bad message" + ref-lock failure on `rl-<vm>` push after
+  warm restore.** Observed during snapcompose-benchmark v3.1.7
+  monolith warm-from-patch (run 26878173765, monolith / warm-from-patch
+  / na job):
+  ```
+  warning: unable to access './objects/info/alternates': Bad message
+  remote: warning: unable to access '/home/rlock/repo/.git/objects/info/alternates': Bad message
+  warning: unable to access './info/grafts': Bad message
+  remote: error: cannot lock ref 'refs/heads/main': unable to create directory for ./refs/heads/main
+  To ssh://localhost:53034/home/rlock/repo
+  git push to VM failed — proceeding with whatever code is in the VM
+   ! [remote rejected] HEAD -> main (failed to update ref)
+  ```
+  `EBADMSG` from the kernel typically indicates filesystem-level
+  corruption — the underlying storage returned data that's not a
+  valid filesystem block / inode. Local symptom: git can't read
+  metadata files in `.git/`, can't create dirs under `.git/refs/`.
+  The framework's `git_sync_source_to_vm` catches the push failure
+  and falls through to "proceeding with whatever code is in the
+  VM," which means the prebuild layer's reconstruction succeeded
+  on the GUEST kernel's view but git tooling sees the FS as broken.
+  Hypothesis: connected to the chain-reconstruction `incoming-
+  memory.bin.zst` size-mismatch TODO above — both look like
+  symptoms of the same disk-image-on-rebase consistency bug.
+  Rebased qcow2's backing chain may be referencing partial /
+  mutated cluster data from a parent's `.tmp.$$` window.
+  Workaround so far: the warm-from-patch cell still produces a
+  number (48 s) because the prebuild layer's `cmd = "sleep 2"`
+  doesn't depend on a working git tree.
+  Repro path: warm-from-patch on monolith Rails fixture, v3.1.8.
