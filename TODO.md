@@ -364,3 +364,55 @@ per call.
     re-apply the push after the rebase + live-restore. More
     surgical but more code; the simpler "push at every miss"
     captures it without special-casing.
+
+## Chain reconstruction: incoming-memory.bin.zst size mismatch + qemu "0 bytes transferred" stalls
+
+- [ ] **Stage-time vs decompress-time size discrepancy on
+  `incoming-memory.bin.zst`.** Found by snapcompose-benchmark
+  v3.1.8 run 26880093017 / job `plus1 / cold / seq`. Traced
+  through main VM's chain (which succeeded a few iterations)
+  then failed at node VM's mise-base restore. Symptoms:
+  - `snapshot_walk_vm_rebase` logs
+    `staged (hardlink): <cache>/.../memory.bin.zst -> <vm>/incoming-memory.bin.zst (XYZ B)`
+    where `XYZ` is the cache file size at stage time.
+  - About 1 s later, when aq_start does `pzstd -dc <file.zst> > <file.bin>`,
+    pzstd's end-of-file output line reports the input size as
+    ~3.5× larger than the staged size (612 MB → 2.2 GB on one
+    iteration; 382 MB → 1.29 GB on another).
+  - QEMU launches with `-incoming file:<decompressed>` but
+    `query-migrate` reports `transferred=0` indefinitely. aq
+    v2.5.52's progress-detection bails after 30 s (clean
+    diagnostic instead of waiting 7+ min).
+  - Trace lines around the failure:
+    `https://github.com/pirj/snapcompose-benchmark/actions/runs/26880093017/job/<seq-job-id>`
+  Hypotheses to investigate:
+  1. **Atomic-rename window** — v0.1.15's snapshot_save writes to
+     `.tmp.$$` then renames. Maybe the staging happens during the
+     window between rm-of-old and rename-of-new, and the hardlink
+     captures a stale partial-write state. Unlikely on single-process
+     seq mode but worth verifying with `inotify`/`fstat` traces.
+  2. **Concatenation in chain reconstruction** — for a chain with
+     N live layers, `snapshot_walk_vm_rebase` overwrites
+     `incoming-memory.bin.zst` per layer. But the FINAL size
+     reported by pzstd suggests the file ended up being the
+     ANCESTOR's zst (not the leaf's), with extra bytes appended
+     by something. Check whether multiple layers' .zst files are
+     being concatenated incorrectly.
+  3. **Hardlink-to-mutating-source** — the hardlink at staging
+     points at the cache slot's inode. If another process (or
+     another step in the same process) writes to the cache slot
+     between stage and decompress, the staged hardlink sees the
+     new bytes. snapshot_save's atomic-rename SHOULD prevent this
+     by creating a new inode, but the rename order matters.
+  4. **QEMU `-incoming file:` zero-bytes** — separately, even
+     with a valid file, QEMU reports 0 bytes transferred. Maybe
+     the decompressed file isn't a valid migration stream (wrong
+     magic, wrong format) and QEMU rejects it silently while
+     staying in `paused (inmigrate)` state. Add `info status`
+     polling with the `-d` (debug) flag to see the actual error.
+  Fix sketch: instrument `snapshot_walk_vm_rebase` to `sha256sum`
+  the file IMMEDIATELY after stage and right before aq_start
+  reads it. Compare. If hashes differ, the file is being mutated
+  in the window — narrow down which process / step is writing.
+  Until root-caused, snapcompose-benchmark `+1 seq cold` and
+  `+N par cold` will continue failing with the same diagnostic.
